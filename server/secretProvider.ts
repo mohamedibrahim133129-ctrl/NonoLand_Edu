@@ -517,9 +517,21 @@ export async function initializeSecretProvider(options?: {
       }
     }
 
-    // Priority 2: Google Cloud Secret Manager (only if keys are missing or diagnostic probe explicitly requested)
+    const requiredAliasMap: Partial<Record<RequiredSecretName, ManagedSecretName>> = {
+      SQL_HOST: 'NONOLAND_DB_HOST',
+      SQL_USER: 'NONOLAND_DB_USER',
+      SQL_PASSWORD: 'NONOLAND_DB_PASSWORD',
+      NONOLAND_SESSION_SECRET: 'SESSION_SECRET',
+    };
+    const missingRequiredAfterAliases = REQUIRED_SECRET_NAMES.filter((name) => {
+      if ((process.env[name] || '').trim()) return false;
+      const alias = requiredAliasMap[name];
+      return !(alias && (process.env[alias] || '').trim());
+    });
+
+    // Priority 2: Google Cloud Secret Manager (only if required keys are missing or diagnostic probe explicitly requested)
     let smReport: SecretManagerCapabilityReport;
-    if (missingNames.length > 0 || options?.forceProbeSecretManager) {
+    if (missingRequiredAfterAliases.length > 0 || options?.forceProbeSecretManager) {
       const smResult = await probeAndLoadFromSecretManager(missingNames);
       smReport = smResult.report;
       for (const [name, val] of smResult.loaded.entries()) {
@@ -542,7 +554,7 @@ export async function initializeSecretProvider(options?: {
         apiEnabled: false,
         iamPermitted: false,
         status: 'not_probed',
-        detail: 'All secrets resolved from process.env; Secret Manager probe skipped.',
+        detail: 'All required secrets resolved from process.env; Secret Manager probe skipped.',
       };
     }
 
