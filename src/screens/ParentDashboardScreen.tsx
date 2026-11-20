@@ -80,6 +80,11 @@ const ParentGatePanel = lazy(() =>
 const PasskeysPanel = lazy(() =>
   import('../components/family/PasskeysPanel').then((m) => ({ default: m.PasskeysPanel })),
 );
+const ParentQuranSettingsPanel = lazy(() =>
+  import('../components/quran/ParentQuranSettingsPanel').then((m) => ({
+    default: m.ParentQuranSettingsPanel,
+  })),
+);
 import { PARENT_OFFLINE_ACTIVITIES } from '../data/academyData';
 import { AGE_CURRICULUM_OUTCOMES } from '../data/deepCurriculum';
 import { ALL_LEVEL1_LESSONS, getLevel1LessonsBySubject } from '../data/level1Curriculum';
@@ -87,7 +92,11 @@ import { DEFAULT_PARENT_SCHEDULE, REPORT_SUBJECT_LABELS } from '../data/worldCat
 import { OFFICIAL_YOUTUBE_CHANNEL } from '../data/funZoneData';
 import { LEARNING_WORLDS } from '../data/worlds';
 import { generateParentInsights } from '../engine/adaptiveEngine';
-import { calculateStreakDays, computeChildSubjectMetrics } from '../engine/monthlyReportEngine';
+import {
+  calculateStreakDays,
+  computeChildSubjectMetrics,
+  type QuranGrowthMetricsInput,
+} from '../engine/monthlyReportEngine';
 import { formatDate, formatNumber, getAgeGroupMeta, SKILL_LABELS, t, UI_COPY } from '../i18n/translations';
 import {
   ActivityTimelineEvent,
@@ -178,6 +187,7 @@ export const ParentDashboardScreen: React.FC = () => {
     | 'adaptive-learning'
     | 'weekly-report'
     | 'together-garden'
+    | 'quran-world'
     | 'content-privacy'
     | 'ai-controls'
     | 'guardians'
@@ -192,6 +202,7 @@ export const ParentDashboardScreen: React.FC = () => {
     | 'youtube';
 
   const [tab, setTab] = useState<DashboardTab>('overview');
+  const [quranGrowthSummary, setQuranGrowthSummary] = useState<QuranGrowthMetricsInput | null>(null);
   const [logoutModalOpen, setLogoutModalOpen] = useState(false);
   const [selectedCert, setSelectedCert] = useState<Certificate | null>(null);
   const [timelineCatFilter, setTimelineCatFilter] = useState<'all' | ActivityTimelineEvent['category']>('all');
@@ -325,8 +336,19 @@ export const ParentDashboardScreen: React.FC = () => {
           if (!cancelled && data) setParentOverview(data);
         })
         .catch(() => {});
+      fetch(`/api/children/${encodeURIComponent(activeChild.id)}/quran`, {
+        credentials: 'include',
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!cancelled) setQuranGrowthSummary(data?.growthSummary || null);
+        })
+        .catch(() => {
+          if (!cancelled) setQuranGrowthSummary(null);
+        });
     } else {
       setParentOverview(null);
+      setQuranGrowthSummary(null);
     }
     return () => {
       cancelled = true;
@@ -629,6 +651,7 @@ export const ParentDashboardScreen: React.FC = () => {
           { id: 'adaptive-learning' as const, label: { ar: 'الملف التكيفي', en: 'Adaptive Profile' }, icon: <Activity className="w-4 h-4" /> },
           { id: 'weekly-report' as const, label: { ar: 'التقرير الأسبوعي', en: 'Weekly Report' }, icon: <FileBarChart2 className="w-4 h-4" /> },
           { id: 'together-garden' as const, label: { ar: 'وقتنا معاً والحديقة', en: 'Together & Garden' }, icon: <Sprout className="w-4 h-4" /> },
+          { id: 'quran-world' as const, label: { ar: 'عالم القرآن والتحفيظ', en: 'Quran World' }, icon: <BookOpen className="w-4 h-4" /> },
           { id: 'content-privacy' as const, label: { ar: 'المحتوى والخصوصية', en: 'Content & Privacy' }, icon: <ShieldCheck className="w-4 h-4" /> },
           { id: 'ai-controls' as const, label: { ar: 'مساعد نونو الصوتي', en: 'Nono AI & Voice' }, icon: <Bot className="w-4 h-4" /> },
           { id: 'guardians' as const, label: { ar: 'أولياء الأمور', en: 'Guardians' }, icon: <Users className="w-4 h-4" /> },
@@ -678,6 +701,12 @@ export const ParentDashboardScreen: React.FC = () => {
         {tab === 'adaptive-learning' && <AdaptiveLearningPanel />}
         {tab === 'weekly-report' && <WeeklyReportPanel />}
         {tab === 'together-garden' && <TogetherAndGardenOverviewPanel />}
+        {tab === 'quran-world' && (
+          <ParentQuranSettingsPanel
+            gateVerified={serverGateVerified}
+            onRequestGateUnlock={() => setTab('parent-gate')}
+          />
+        )}
         {tab === 'content-privacy' && (
           <ContentPrivacyPanel
             gateVerified={serverGateVerified}
@@ -844,7 +873,7 @@ export const ParentDashboardScreen: React.FC = () => {
 
           {/* Interactive SVG Domain Analytics Chart & Activity Timeline */}
           {(() => {
-            const domainMetrics = computeChildSubjectMetrics(activeChild);
+            const domainMetrics = computeChildSubjectMetrics(activeChild, quranGrowthSummary);
             const domainKeys = Object.keys(REPORT_SUBJECT_LABELS) as ReportSubjectKey[];
             const domainColors: Record<ReportSubjectKey, string> = {
               arabic: '#8054D9',
@@ -853,6 +882,7 @@ export const ParentDashboardScreen: React.FC = () => {
               logic: '#6366F1',
               creative: '#FF78B7',
               general: '#55D98B',
+              'quran-values': '#047857',
             };
 
             const mergedEvents: ActivityTimelineEvent[] = [
@@ -892,8 +922,8 @@ export const ParentDashboardScreen: React.FC = () => {
                       <BarChart3 className="w-5 h-5 text-[#8054D9]" />
                       <span>
                         {language === 'ar'
-                          ? 'الرسم البياني لمجالات التعلم الستة'
-                          : '6-Domain Performance & Activity Chart'}
+                          ? 'الرسم البياني لمجالات التعلم السبعة'
+                          : '7-Domain Performance & Activity Chart'}
                       </span>
                     </h2>
                     <button
@@ -905,12 +935,12 @@ export const ParentDashboardScreen: React.FC = () => {
                     </button>
                   </div>
 
-                  <svg viewBox="0 0 420 210" className="w-full h-48 bg-[#FFFDF7] rounded-2xl border border-[#27345C]/10 p-2">
+                  <svg viewBox="0 0 460 210" className="w-full h-48 bg-[#FFFDF7] rounded-2xl border border-[#27345C]/10 p-2">
                     {[0, 25, 50, 75, 100].map((tick) => {
                       const y = 170 - (tick / 100) * 135;
                       return (
                         <g key={tick}>
-                          <line x1="36" y1={y} x2="405" y2={y} stroke="#E2E8F0" strokeDasharray="3 3" />
+                          <line x1="36" y1={y} x2="445" y2={y} stroke="#E2E8F0" strokeDasharray="3 3" />
                           <text x="8" y={y + 4} fontSize="10" fill="#64748B" fontWeight="700">
                             {tick}%
                           </text>
@@ -919,25 +949,34 @@ export const ParentDashboardScreen: React.FC = () => {
                     })}
                     {domainKeys.map((dk, idx) => {
                       const m = domainMetrics[dk];
-                      const pct = m.accuracyPct ?? 0;
+                      const isQuranValues = dk === 'quran-values';
+                      const pct = isQuranValues
+                        ? Math.min(100, m.completedCount * 12)
+                        : (m.accuracyPct ?? 0);
                       const barH = (pct / 100) * 135;
-                      const x = 48 + idx * 60;
+                      const x = 46 + idx * 56;
                       const y = 170 - barH;
                       return (
                         <g key={dk}>
                           <rect
                             x={x}
                             y={pct > 0 ? y : 164}
-                            width="34"
+                            width="32"
                             height={pct > 0 ? barH : 6}
                             rx="7"
                             fill={pct > 0 ? domainColors[dk] : '#CBD5E1'}
                           />
-                          <text x={x + 17} y={pct > 0 ? Math.max(20, y - 6) : 158} textAnchor="middle" fontSize="10" fontWeight="800" fill="#27345C">
-                            {m.accuracyPct !== null ? `${pct}%` : '—'}
+                          <text x={x + 16} y={pct > 0 ? Math.max(20, y - 6) : 158} textAnchor="middle" fontSize="10" fontWeight="800" fill="#27345C">
+                            {isQuranValues
+                              ? m.completedCount > 0
+                                ? `${m.completedCount}`
+                                : '—'
+                              : m.accuracyPct !== null
+                                ? `${pct}%`
+                                : '—'}
                           </text>
-                          <text x={x + 17} y="192" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="#27345C">
-                            {dk.slice(0, 6).toUpperCase()}
+                          <text x={x + 16} y="192" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="#27345C">
+                            {dk === 'quran-values' ? 'QURAN' : dk.slice(0, 6).toUpperCase()}
                           </text>
                         </g>
                       );
@@ -945,8 +984,8 @@ export const ParentDashboardScreen: React.FC = () => {
                   </svg>
                   <p className="text-[11px] text-[#27345C]/65">
                     {language === 'ar'
-                      ? 'الرمز (—) يعني عدم توفر محاولات كافية بعد في هذا المجال.'
-                      : 'Bars marked (—) indicate no recorded accuracy data in that domain yet.'}
+                      ? 'مجال القرآن والقيم يعرض عدد لحظات الاستماع والقصص والآداب المستقلة تماماً عن نسب الاختبارات. الرمز (—) يعني عدم توفر محاولات كافية بعد.'
+                      : 'Quran & Values shows logged spiritual moments completely independent of exam percentages. Bars marked (—) indicate no recorded accuracy data yet.'}
                   </p>
                 </div>
 
@@ -963,6 +1002,7 @@ export const ParentDashboardScreen: React.FC = () => {
                         className="min-h-[36px] px-2.5 rounded-xl bg-[#FFF8E9] border border-[#27345C]/15 text-xs font-bold"
                       >
                         <option value="all">{language === 'ar' ? 'كل الأنواع' : 'All Types'}</option>
+                        <option value="quran">{language === 'ar' ? 'عالم القرآن' : 'Quran World'}</option>
                         <option value="lesson">{language === 'ar' ? 'الدروس' : 'Lessons'}</option>
                         <option value="game">{language === 'ar' ? 'الألعاب' : 'Games'}</option>
                         <option value="lab">{language === 'ar' ? 'المختبر' : 'Lab'}</option>

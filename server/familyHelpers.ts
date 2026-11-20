@@ -79,6 +79,12 @@ export function ensureFamilyCollections(db: ServerDb): void {
   db.dataRequests = db.dataRequests || {};
   db.aiUsageRecords = db.aiUsageRecords || {};
   db.gardenRewardEvents = db.gardenRewardEvents || {};
+  db.quranChildSettings = db.quranChildSettings || {};
+  db.quranSurahProgress = db.quranSurahProgress || {};
+  db.quranStoryProgress = db.quranStoryProgress || {};
+  db.quranMannerProgress = db.quranMannerProgress || {};
+  db.quranActivityEvents = db.quranActivityEvents || [];
+  db.quranContentVerifications = db.quranContentVerifications || {};
 }
 
 export function createDefaultContentPolicy(familyId: string, updatedBy?: string): ContentPermissionPolicy {

@@ -40,6 +40,7 @@ const FLAG_META: Array<{ key: keyof FeatureFlags; ar: string; en: string; desc: 
   { key: 'newSubjectsEnabled', ar: 'تفعيل المواد الجديدة', en: 'New Curriculum Subjects', desc: 'Controls newly introduced subjects and tracks.' },
   { key: 'newGameModulesEnabled', ar: 'تفعيل الألعاب التعليمية الجديدة', en: 'New Interactive Game Modules', desc: 'Controls experimental/newly published mini-games.' },
   { key: 'requireTeacherContentApproval', ar: 'اشتراط موافقة الإدارة قبل نشر محتوى المعلم', en: 'Require Admin Approval for Teacher Content', desc: 'Forces teacher exams/homework/questions through Admin approval queue before students see them.' },
+  { key: 'quranWorldEnabled', ar: 'تفعيل عالم القرآن الكريم (١–٤ سنوات)', en: 'Quran World Module (Ages 1–4)', desc: 'Controls child access to Quran World Surahs, Listen & Repeat, Stories, and Islamic Manners.' },
 ];
 
 export const AdminGovernancePanel: React.FC<GovernanceProps> = ({

@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import crypto from 'node:crypto';
 import { spawn, ChildProcess } from 'node:child_process';
-import { getPgConnectionDiagnostics } from '../src/db/index.ts';
+import { getPgConnectionDiagnostics, pool, resetPoolForResolvedSecrets } from '../src/db/index.ts';
 import {
   getNonSensitiveDbSettings,
   getSecret,
@@ -86,57 +86,141 @@ function killServer(proc: ChildProcess) {
   }
 }
 
+function clearAllDbEnvVars() {
+  delete process.env.NONOLAND_DB_HOST;
+  delete process.env.NONOLAND_DB_DIRECT_HOST;
+  delete process.env.NONOLAND_DB_NAME;
+  delete process.env.NONOLAND_DB_USER;
+  delete process.env.NONOLAND_DB_PASSWORD;
+  delete process.env.SQL_HOST;
+  delete process.env.SQL_DIRECT_HOST;
+  delete process.env.SQL_DB_NAME;
+  delete process.env.SQL_USER;
+  delete process.env.SQL_PASSWORD;
+  delete process.env.DATABASE_URL;
+  delete process.env.DIRECT_DATABASE_URL;
+  delete process.env.SQL_SSL;
+  delete process.env.SQL_SSL_REJECT_UNAUTHORIZED;
+}
+
 async function testDiagnosticsConfig() {
   const savedEnv = { ...process.env };
   try {
-    delete process.env.SQL_HOST;
-    delete process.env.SQL_DB_NAME;
-    delete process.env.SQL_USER;
-    delete process.env.SQL_PASSWORD;
-    delete process.env.DATABASE_URL;
-    delete process.env.SQL_SSL;
+    clearAllDbEnvVars();
 
     const emptyDiag = getPgConnectionDiagnostics();
     assert.strictEqual(emptyDiag.configured, false);
+    assert.strictEqual(emptyDiag.configComplete, false);
     assert.strictEqual(emptyDiag.source, 'none');
+    assert.strictEqual(emptyDiag.configSource, 'none');
+    assert.strictEqual(emptyDiag.databaseName, null);
     assert.deepStrictEqual(emptyDiag.missingEnvVars, ['SQL_HOST', 'SQL_DB_NAME', 'SQL_USER', 'SQL_PASSWORD']);
 
+    // 1. NONOLAND_DB_* wins over SQL_* and DATABASE_URL when both groups are present
+    process.env.NONOLAND_DB_HOST = 'ep-nonoland-prod-pooler.eu-central-1.aws.neon.tech';
+    process.env.NONOLAND_DB_DIRECT_HOST = 'ep-nonoland-prod.eu-central-1.aws.neon.tech';
+    process.env.NONOLAND_DB_NAME = 'neondb';
+    process.env.NONOLAND_DB_USER = 'nonoland_owner';
+    process.env.NONOLAND_DB_PASSWORD = 'nonoland_secret_password';
+    process.env.SQL_HOST = 'ep-other-sql.us-east-2.aws.neon.tech';
+    process.env.SQL_DIRECT_HOST = 'ep-other-sql-direct.us-east-2.aws.neon.tech';
+    process.env.SQL_DB_NAME = 'wrong_sql_db';
+    process.env.SQL_USER = 'wrong_sql_user';
+    process.env.SQL_PASSWORD = 'wrong_sql_password';
+    process.env.DATABASE_URL = 'postgresql://url_user:url_pass@ep-url-host.aws.neon.tech:5432/wrong_url_db?sslmode=require';
+
+    resetPoolForResolvedSecrets();
+    const nonolandWinsDiag = getPgConnectionDiagnostics();
+    assert.strictEqual(nonolandWinsDiag.configured, true);
+    assert.strictEqual(nonolandWinsDiag.configComplete, true);
+    assert.strictEqual(nonolandWinsDiag.source, 'sql_vars');
+    assert.strictEqual(nonolandWinsDiag.configSource, 'NONOLAND_DB_*');
+    assert.strictEqual(nonolandWinsDiag.databaseName, 'neondb');
+    assert.strictEqual(nonolandWinsDiag.sslEnabled, true);
+    assert.strictEqual(nonolandWinsDiag.isNeonHost, true);
+    assert.strictEqual(nonolandWinsDiag.isPooledEndpoint, true);
+    assert.strictEqual(nonolandWinsDiag.hasDirectMigrationHost, true);
+
+    const activePoolOpts = (pool as unknown as { options?: { host?: string; database?: string; user?: string; password?: string; ssl?: unknown } }).options;
+    assert.strictEqual(activePoolOpts?.host, 'ep-nonoland-prod-pooler.eu-central-1.aws.neon.tech');
+    assert.strictEqual(activePoolOpts?.database, 'neondb');
+    assert.strictEqual(activePoolOpts?.user, 'nonoland_owner');
+    assert.strictEqual(activePoolOpts?.password, 'nonoland_secret_password');
+    assert.deepStrictEqual(activePoolOpts?.ssl, { rejectUnauthorized: true });
+
+    // 2. SQL_* works when NONOLAND_DB_* is absent
+    clearAllDbEnvVars();
     process.env.SQL_HOST = 'ep-example-12345-pooler.us-east-2.aws.neon.tech';
-    process.env.SQL_DB_NAME = 'neondb';
+    process.env.SQL_DB_NAME = 'sql_explicit_db';
     process.env.SQL_USER = 'neondb_owner';
     process.env.SQL_PASSWORD = 'placeholder_password';
-    const neonDiag = getPgConnectionDiagnostics();
-    assert.strictEqual(neonDiag.configured, true);
-    assert.strictEqual(neonDiag.source, 'sql_vars');
-    assert.strictEqual(neonDiag.sslEnabled, true);
-    assert.strictEqual(neonDiag.isNeonHost, true);
-    assert.strictEqual(neonDiag.isPooledEndpoint, true);
+    process.env.DATABASE_URL = 'postgresql://url_user:url_pass@ep-url-host.aws.neon.tech:5432/ignored_url_db?sslmode=require';
 
-    delete process.env.SQL_HOST;
-    delete process.env.SQL_DB_NAME;
-    delete process.env.SQL_USER;
-    delete process.env.SQL_PASSWORD;
-    process.env.DATABASE_URL = 'postgresql://user:pass@ep-example-pooler.aws.neon.tech:5432/neondb?sslmode=require';
+    resetPoolForResolvedSecrets();
+    const sqlDiag = getPgConnectionDiagnostics();
+    assert.strictEqual(sqlDiag.configured, true);
+    assert.strictEqual(sqlDiag.configComplete, true);
+    assert.strictEqual(sqlDiag.source, 'sql_vars');
+    assert.strictEqual(sqlDiag.configSource, 'SQL_*');
+    assert.strictEqual(sqlDiag.databaseName, 'sql_explicit_db');
+    assert.strictEqual(sqlDiag.sslEnabled, true);
+    assert.strictEqual(sqlDiag.isNeonHost, true);
+    assert.strictEqual(sqlDiag.isPooledEndpoint, true);
+
+    const sqlPoolOpts = (pool as unknown as { options?: { host?: string; database?: string; user?: string; password?: string; ssl?: unknown } }).options;
+    assert.strictEqual(sqlPoolOpts?.host, 'ep-example-12345-pooler.us-east-2.aws.neon.tech');
+    assert.strictEqual(sqlPoolOpts?.database, 'sql_explicit_db');
+    assert.strictEqual(sqlPoolOpts?.user, 'neondb_owner');
+    assert.deepStrictEqual(sqlPoolOpts?.ssl, { rejectUnauthorized: true });
+
+    // 3. DATABASE_URL fallback works when neither individual group provides a complete valid configuration
+    clearAllDbEnvVars();
+    process.env.SQL_DB_NAME = 'incomplete_group_only';
+    process.env.DATABASE_URL = 'postgresql://url_user:url_pass@ep-example-pooler.aws.neon.tech:5432/url_neondb?sslmode=require';
+    resetPoolForResolvedSecrets();
     const urlDiag = getPgConnectionDiagnostics();
     assert.strictEqual(urlDiag.configured, true);
+    assert.strictEqual(urlDiag.configComplete, true);
     assert.strictEqual(urlDiag.source, 'database_url');
+    assert.strictEqual(urlDiag.configSource, 'DATABASE_URL');
+    assert.strictEqual(urlDiag.databaseName, 'url_neondb');
     assert.strictEqual(urlDiag.sslEnabled, true);
     assert.strictEqual(urlDiag.isNeonHost, true);
+    assert.strictEqual(urlDiag.isPooledEndpoint, true);
 
-    // Non-sensitive defaults: SQL_DB_NAME=neondb, SQL_PORT=5432, SQL_SSL=true when SQL_DB_NAME is omitted
-    delete process.env.DATABASE_URL;
-    process.env.SQL_HOST = 'ep-example-pooler.us-east-2.aws.neon.tech';
-    process.env.SQL_USER = 'neondb_owner';
-    process.env.SQL_PASSWORD = 'placeholder_password';
+    const urlPoolOpts = (pool as unknown as { options?: { host?: string; database?: string; user?: string; ssl?: unknown } }).options;
+    assert.strictEqual(urlPoolOpts?.host, 'ep-example-pooler.aws.neon.tech');
+    assert.strictEqual(urlPoolOpts?.database, 'url_neondb');
+    assert.strictEqual(urlPoolOpts?.user, 'url_user');
+    assert.deepStrictEqual(urlPoolOpts?.ssl, { rejectUnauthorized: true });
+
+    // 4. Default database is neondb only when no explicit database name exists
+    clearAllDbEnvVars();
+    process.env.NONOLAND_DB_HOST = 'ep-example-pooler.eu-central-1.aws.neon.tech';
+    process.env.NONOLAND_DB_USER = 'neondb_owner';
+    process.env.NONOLAND_DB_PASSWORD = 'placeholder_password';
+    resetPoolForResolvedSecrets();
     const defaultedDiag = getPgConnectionDiagnostics();
     assert.strictEqual(defaultedDiag.configured, true);
+    assert.strictEqual(defaultedDiag.configComplete, true);
+    assert.strictEqual(defaultedDiag.configSource, 'NONOLAND_DB_*');
+    assert.strictEqual(defaultedDiag.databaseName, 'neondb');
     assert.strictEqual(defaultedDiag.sslEnabled, true);
     const dbDefaults = getNonSensitiveDbSettings();
     assert.strictEqual(dbDefaults.SQL_DB_NAME, 'neondb');
     assert.strictEqual(dbDefaults.SQL_PORT, 5432);
     assert.strictEqual(dbDefaults.SQL_SSL, true);
 
+    process.env.NONOLAND_DB_NAME = 'explicit_custom_db';
+    const explicitDiag = getPgConnectionDiagnostics();
+    assert.strictEqual(explicitDiag.databaseName, 'explicit_custom_db');
+    assert.strictEqual(getNonSensitiveDbSettings().SQL_DB_NAME, 'explicit_custom_db');
+
     // SecretProvider Priority 1 (process.env) -> fail closed when Secret Manager disabled/unavailable
+    clearAllDbEnvVars();
+    process.env.SQL_HOST = 'ep-example-pooler.us-east-2.aws.neon.tech';
+    process.env.SQL_USER = 'neondb_owner';
+    process.env.SQL_PASSWORD = 'placeholder_password';
     resetSecretProviderForTesting();
     process.env.DISABLE_SECRET_MANAGER = 'true';
     delete process.env.NONOLAND_SESSION_SECRET;
@@ -161,10 +245,11 @@ async function testDiagnosticsConfig() {
     assert.ok(spSnap.presentRequired.includes('NONOLAND_SESSION_SECRET'));
     assert.deepStrictEqual(spSnap.missingRequired, ['NONOLAND_ADMIN_SETUP_SECRET']);
 
-    console.log('✓ Test 1 passed: Neon SSL, defaults, SecretProvider priority & env diagnostics');
+    console.log('✓ Test 1 passed: NONOLAND_DB_* > SQL_* > DATABASE_URL precedence, Neon TLS, defaults & SecretProvider');
   } finally {
     process.env = savedEnv;
     resetSecretProviderForTesting();
+    resetPoolForResolvedSecrets();
   }
 }
 
@@ -177,11 +262,18 @@ async function testProductionFailClosed() {
       ...process.env,
       PORT: String(port),
       NODE_ENV: 'production',
+      NONOLAND_DB_HOST: '',
+      NONOLAND_DB_DIRECT_HOST: '',
+      NONOLAND_DB_NAME: '',
+      NONOLAND_DB_USER: '',
+      NONOLAND_DB_PASSWORD: '',
       SQL_HOST: '',
+      SQL_DIRECT_HOST: '',
       SQL_DB_NAME: '',
       SQL_USER: '',
       SQL_PASSWORD: '',
       DATABASE_URL: '',
+      DIRECT_DATABASE_URL: '',
       SESSION_SECRET: crypto.randomBytes(24).toString('hex'),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -197,6 +289,11 @@ async function testProductionFailClosed() {
     assert.strictEqual(healthJson.database, 'unavailable');
     assert.strictEqual(healthJson.code, 'DB_UNAVAILABLE');
     assert.strictEqual(healthJson.reason, 'missing_env_vars');
+    assert.strictEqual(healthJson.configSource, 'none');
+    assert.strictEqual(healthJson.configComplete, false);
+    assert.strictEqual(healthJson.databaseName, null);
+    assert.strictEqual(healthJson.isNeonHost, false);
+    assert.strictEqual(healthJson.isPooledEndpoint, false);
     assert.ok(Array.isArray(healthJson.missingEnvVars));
 
     const childLoginRes = await fetch(`${baseUrl}/api/auth/child-login`, {
@@ -234,6 +331,71 @@ async function testProductionFailClosed() {
   } finally {
     killServer(serverProc);
   }
+
+  // Verify /api/health safe metadata & zero secret leakage when NONOLAND_DB_* overrides SQL_* on unreachable local port
+  const portDiag = 3203;
+  const baseUrlDiag = `http://127.0.0.1:${portDiag}`;
+  const sentinelSessionSecret = 'sentinel_session_secret_never_leak_999';
+  const sentinelAdminSecret = 'sentinel_admin_secret_never_leak_888';
+  const sentinelPassword = 'sentinel_db_password_never_leak_777';
+  const sentinelUser = 'sentinel_db_user_never_leak_666';
+  const diagProc = spawn('npx', ['tsx', 'server.ts'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PORT: String(portDiag),
+      NODE_ENV: 'production',
+      DISABLE_SECRET_MANAGER: 'true',
+      NONOLAND_DB_HOST: '127.0.0.1',
+      NONOLAND_DB_NAME: 'neondb',
+      NONOLAND_DB_USER: sentinelUser,
+      NONOLAND_DB_PASSWORD: sentinelPassword,
+      SQL_HOST: 'wrong_sql_host.invalid',
+      SQL_DB_NAME: 'wrong_sql_db',
+      SQL_USER: 'wrong_sql_user',
+      SQL_PASSWORD: 'wrong_sql_password',
+      SQL_PORT: '59999',
+      NONOLAND_SESSION_SECRET: sentinelSessionSecret,
+      NONOLAND_ADMIN_SETUP_SECRET: sentinelAdminSecret,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+  });
+
+  try {
+    await waitForHttpReady(`${baseUrlDiag}/api/health`);
+    const res = await fetch(`${baseUrlDiag}/api/health`);
+    assert.strictEqual(res.status, 503);
+    const bodyText = await res.text();
+    const json = JSON.parse(bodyText) as Record<string, unknown>;
+    assert.strictEqual(json.database, 'unavailable');
+    assert.strictEqual(json.code, 'DB_UNAVAILABLE');
+    assert.strictEqual(json.databaseName, 'neondb');
+    assert.strictEqual(json.configSource, 'NONOLAND_DB_*');
+    assert.strictEqual(json.configComplete, true);
+    assert.strictEqual(json.isNeonHost, false);
+    assert.strictEqual(json.isPooledEndpoint, false);
+    assert.strictEqual(json.sslEnabled, true);
+    assert.strictEqual(json.schemaReady, false);
+    for (const forbidden of [
+      '127.0.0.1',
+      'wrong_sql_host',
+      'wrong_sql_db',
+      'wrong_sql_user',
+      'wrong_sql_password',
+      sentinelUser,
+      sentinelPassword,
+      sentinelSessionSecret,
+      sentinelAdminSecret,
+      'postgresql://',
+      'postgres://',
+    ]) {
+      assert.ok(!bodyText.includes(forbidden), `/api/health must never leak sensitive detail: ${forbidden}`);
+    }
+    console.log('✓ Test 2b passed: /api/health reports safe metadata and leaks zero secrets or connection details');
+  } finally {
+    killServer(diagProc);
+  }
 }
 
 async function testDevSeedSeparationAndSuperAdmin() {
@@ -246,11 +408,18 @@ async function testDevSeedSeparationAndSuperAdmin() {
       ...process.env,
       PORT: String(port),
       NODE_ENV: 'development',
+      NONOLAND_DB_HOST: '',
+      NONOLAND_DB_DIRECT_HOST: '',
+      NONOLAND_DB_NAME: '',
+      NONOLAND_DB_USER: '',
+      NONOLAND_DB_PASSWORD: '',
       SQL_HOST: '',
+      SQL_DIRECT_HOST: '',
       SQL_DB_NAME: '',
       SQL_USER: '',
       SQL_PASSWORD: '',
       DATABASE_URL: '',
+      DIRECT_DATABASE_URL: '',
       REQUIRE_POSTGRES: '',
       NONOLAND_ADMIN_SETUP_SECRET: setupSecret,
       SESSION_SECRET: crypto.randomBytes(24).toString('hex'),
@@ -266,6 +435,11 @@ async function testDevSeedSeparationAndSuperAdmin() {
     assert.strictEqual(healthRes.status, 200);
     const healthJson = (await healthRes.json()) as Record<string, unknown>;
     assert.strictEqual(healthJson.database, 'in-memory-dev');
+    assert.strictEqual(healthJson.databaseName, null);
+    assert.strictEqual(healthJson.configSource, 'none');
+    assert.strictEqual(healthJson.configComplete, false);
+    assert.strictEqual(healthJson.isNeonHost, false);
+    assert.strictEqual(healthJson.isPooledEndpoint, false);
 
     const super1 = new E2ECookieClient(baseUrl);
     const super1Pw = 'SuperAdmin#2026!A';

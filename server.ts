@@ -72,6 +72,7 @@ import {
   registerPasskeyRoutes,
 } from './server/passkeyRoutes';
 import { registerReadingAndFamilyRoutes } from './server/readingAndFamilyRoutes';
+import { registerQuranRoutes } from './server/quranRoutes';
 import { registerSmartAssessmentRoutes } from './server/smartAssessmentRoutes';
 import { registerTeacherAndLevel2Routes } from './server/teacherRoutes';
 import { registerWorldExperienceRoutes } from './server/worldExperienceRoutes';
@@ -262,6 +263,11 @@ async function startServer() {
         reason: health.reason || 'connection_failed',
         ...(health.errorCode ? { errorCode: health.errorCode } : {}),
         missingEnvVars: health.missingEnvVars,
+        databaseName: health.databaseName,
+        configSource: health.configSource,
+        configComplete: health.configComplete,
+        isNeonHost: health.isNeonHost,
+        isPooledEndpoint: health.isPooledEndpoint,
         sslEnabled: health.sslEnabled,
         schemaReady: health.schemaReady,
       });
@@ -269,6 +275,11 @@ async function startServer() {
     res.json({
       status: 'ok',
       database: health.database,
+      databaseName: health.databaseName,
+      configSource: health.configSource,
+      configComplete: health.configComplete,
+      isNeonHost: health.isNeonHost,
+      isPooledEndpoint: health.isPooledEndpoint,
       sslEnabled: health.sslEnabled,
       schemaReady: health.schemaReady,
     });
@@ -2536,6 +2547,15 @@ async function startServer() {
     saveDb,
     requireAuth,
     assertChildAccess,
+  });
+
+  registerQuranRoutes({
+    app,
+    getDb,
+    saveDb,
+    requireAuth,
+    assertChildAccess,
+    requireAdminPermission,
   });
 
   app.use('/api', (_req, res) => {

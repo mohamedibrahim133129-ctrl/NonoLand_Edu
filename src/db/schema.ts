@@ -53,6 +53,8 @@ import type {
   PlacedRoomItem,
   PrivacyConsentType,
   QuestionQualityFlag,
+  QuranMemorizationStatus,
+  QuranVerificationStatus,
   ReadingStageProgress,
   RecommendedAgeRange,
   RewardTransaction,
@@ -1057,9 +1059,141 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   webauthnChallenges: many(webauthnChallenges),
 }));
 
-export const childrenRelations = relations(children, ({ one }) => ({
+export const childrenRelations = relations(children, ({ one, many }) => ({
   parent: one(users, { fields: [children.parentId], references: [users.id] }),
   family: one(families, { fields: [children.familyId], references: [families.id] }),
   credentials: one(childCredentials, { fields: [children.id], references: [childCredentials.childId] }),
+  quranSettings: one(quranChildSettings, { fields: [children.id], references: [quranChildSettings.childId] }),
+  quranSurahProgress: many(quranSurahProgress),
+  quranStoryProgress: many(quranStoryProgress),
+  quranMannerProgress: many(quranMannerProgress),
+  quranActivityEvents: many(quranActivityEvents),
 }));
+
+// 25. Quran World — Per-Child Settings, Progress, Activity & Verification Provenance (Strictly Additive)
+export const quranChildSettings = pgTable(
+  'quran_child_settings',
+  {
+    childId: text('child_id')
+      .primaryKey()
+      .references(() => children.id, { onDelete: 'cascade' }),
+    enabled: boolean('enabled').notNull().default(true),
+    allowedSurahIds: jsonb('allowed_surah_ids').$type<string[]>().notNull().default([]),
+    surahOrder: jsonb('surah_order').$type<string[]>().notNull().default([]),
+    preferredReciterId: text('preferred_reciter_id').notNull().default('adult-husary-muallim'),
+    preferChildReciterFallback: boolean('prefer_child_reciter_fallback').notNull().default(true),
+    repeatCount: integer('repeat_count').notNull().default(2),
+    listenOnlyMode: boolean('listen_only_mode').notNull().default(false),
+    dailyMaxMinutes: integer('daily_max_minutes').notNull().default(15),
+    gentleReminderEnabled: boolean('gentle_reminder_enabled').notNull().default(false),
+    updatedByUserId: text('updated_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check('quran_settings_repeat_range', sql`${table.repeatCount} >= 1 AND ${table.repeatCount} <= 5`),
+    check('quran_settings_minutes_range', sql`${table.dailyMaxMinutes} >= 5 AND ${table.dailyMaxMinutes} <= 60`),
+  ],
+);
+
+export const quranSurahProgress = pgTable(
+  'quran_surah_progress',
+  {
+    id: text('id').primaryKey(),
+    childId: text('child_id')
+      .notNull()
+      .references(() => children.id, { onDelete: 'cascade' }),
+    surahId: text('surah_id').notNull(),
+    listenCount: integer('listen_count').notNull().default(0),
+    repeatSessionsCount: integer('repeat_sessions_count').notNull().default(0),
+    ayahsPracticed: jsonb('ayahs_practiced').$type<number[]>().notNull().default([]),
+    status: text('status').$type<QuranMemorizationStatus>().notNull().default('not_started'),
+    parentConfirmedMemorization: boolean('parent_confirmed_memorization').notNull().default(false),
+    parentConfirmedAt: text('parent_confirmed_at'),
+    parentConfirmedByUserId: text('parent_confirmed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    parentNote: text('parent_note'),
+    lastListenedAt: text('last_listened_at'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('quran_surah_progress_child_surah_uidx').on(table.childId, table.surahId),
+    index('quran_surah_progress_child_idx').on(table.childId),
+    check('quran_surah_listen_non_negative', sql`${table.listenCount} >= 0`),
+    check('quran_surah_repeat_non_negative', sql`${table.repeatSessionsCount} >= 0`),
+  ],
+);
+
+export const quranStoryProgress = pgTable(
+  'quran_story_progress',
+  {
+    id: text('id').primaryKey(),
+    childId: text('child_id')
+      .notNull()
+      .references(() => children.id, { onDelete: 'cascade' }),
+    storyId: text('story_id').notNull(),
+    completedCount: integer('completed_count').notNull().default(0),
+    lastReadAt: text('last_read_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('quran_story_progress_child_story_uidx').on(table.childId, table.storyId),
+    index('quran_story_progress_child_idx').on(table.childId),
+    check('quran_story_completed_non_negative', sql`${table.completedCount} >= 0`),
+  ],
+);
+
+export const quranMannerProgress = pgTable(
+  'quran_manners_progress',
+  {
+    id: text('id').primaryKey(),
+    childId: text('child_id')
+      .notNull()
+      .references(() => children.id, { onDelete: 'cascade' }),
+    mannerId: text('manner_id').notNull(),
+    practicedCount: integer('practiced_count').notNull().default(0),
+    lastPracticedAt: text('last_practiced_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('quran_manners_progress_child_manner_uidx').on(table.childId, table.mannerId),
+    index('quran_manners_progress_child_idx').on(table.childId),
+    check('quran_manners_practiced_non_negative', sql`${table.practicedCount} >= 0`),
+  ],
+);
+
+export const quranActivityEvents = pgTable(
+  'quran_activity_events',
+  {
+    id: text('id').primaryKey(),
+    childId: text('child_id')
+      .notNull()
+      .references(() => children.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').$type<'listen' | 'repeat' | 'story' | 'manner' | 'parent_confirm'>().notNull(),
+    targetId: text('target_id').notNull(),
+    durationSeconds: integer('duration_seconds').notNull().default(0),
+    ayahCount: integer('ayah_count').notNull().default(0),
+    reciterId: text('reciter_id'),
+    recordedByUserId: text('recorded_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    occurredAt: text('occurred_at').notNull(),
+  },
+  (table) => [
+    index('quran_activity_events_child_idx').on(table.childId),
+    index('quran_activity_events_occurred_idx').on(table.occurredAt),
+    check('quran_event_duration_non_negative', sql`${table.durationSeconds} >= 0`),
+    check('quran_event_ayahs_non_negative', sql`${table.ayahCount} >= 0`),
+  ],
+);
+
+export const quranContentVerifications = pgTable('quran_content_verifications', {
+  id: text('id').primaryKey(),
+  contentType: text('content_type').$type<'surah_text' | 'reciter_audio'>().notNull(),
+  contentKey: text('content_key').notNull().unique(),
+  sourceName: text('source_name').notNull(),
+  licenseOrPermission: text('license_or_permission').notNull(),
+  tajweedReviewedBy: text('tajweed_reviewed_by'),
+  tajweedReviewedAt: text('tajweed_reviewed_at'),
+  verificationStatus: text('verification_status').$type<QuranVerificationStatus>().notNull(),
+  audioUrlsJson: jsonb('audio_urls_json').$type<Record<string, string> | null>(),
+  notes: text('notes'),
+  updatedByUserId: text('updated_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: text('updated_at').notNull(),
+});
+
 

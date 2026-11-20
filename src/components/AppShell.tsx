@@ -350,6 +350,13 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               {(
                 [
                   {
+                    id: 'quran-world' as AppScreen,
+                    emoji: '🌙',
+                    ar: 'عالم القرآن الكريم',
+                    en: 'Quran World',
+                    activeCls: 'bg-[#047857] text-white',
+                  },
+                  {
                     id: 'nono-ai' as AppScreen,
                     emoji: '🤖',
                     ar: 'مساعد نونو الذكي',

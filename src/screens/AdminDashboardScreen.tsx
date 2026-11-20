@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { AdminCmsPanel } from '../components/AdminCmsPanel';
 import { AdminGovernancePanel, AdminOpsPanel } from '../components/AdminGovernanceAndOpsPanel';
+import { AdminQuranProvenancePanel } from '../components/quran/AdminQuranProvenancePanel';
 import { NonoLandLogo } from '../components/NonoLandLogo';
 import { useNonoLand } from '../context/NonoLandContext';
 import { t } from '../i18n/translations';
@@ -152,7 +153,8 @@ type AdminTab =
   | 'exams'
   | 'governance'
   | 'ops'
-  | 'cms';
+  | 'cms'
+  | 'quran-provenance';
 
 const ADMIN_ALLOWED_ROLES = new Set([
   'super_admin',
@@ -732,6 +734,11 @@ export const AdminDashboardScreen: React.FC = () => {
             id: 'cms' as const,
             label: language === 'ar' ? 'المحتوى والشهادات' : 'CMS',
             icon: <Settings className="w-4 h-4" />,
+          },
+          {
+            id: 'quran-provenance' as const,
+            label: language === 'ar' ? 'مراجعة القرآن والتلاوات' : 'Quran Provenance',
+            icon: <ShieldCheck className="w-4 h-4" />,
           },
         ].map((item) => (
           <button
@@ -1826,6 +1833,11 @@ export const AdminDashboardScreen: React.FC = () => {
 
       {/* EXISTING ADMIN CMS PANEL */}
       {tab === 'cms' && <AdminCmsPanel language={language} />}
+
+      {/* QURAN PROVENANCE & RECITATION VERIFICATION PANEL */}
+      {tab === 'quran-provenance' && (
+        <AdminQuranProvenancePanel apiFetch={apiFetch} onNotice={setNotice} onError={setErrorMsg} />
+      )}
 
       {/* ===============================================================
           MODAL: TEACHER DETAILS

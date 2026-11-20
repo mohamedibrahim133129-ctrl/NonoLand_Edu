@@ -29,6 +29,12 @@ import type {
   Level2LessonProgress,
   Level2ProgressionConfig,
   PrivacyConsentRecord,
+  QuranActivityEvent,
+  QuranChildSettings,
+  QuranContentVerificationRecord,
+  QuranMannerProgress,
+  QuranStoryProgress,
+  QuranSurahProgress,
   SecurityEventLog,
   SkillId,
   SmartAssessmentFormat,
@@ -256,6 +262,12 @@ export interface ServerDb {
   processedSyncKeys: Record<string, { childId: string; processedAt: string; summary: string }>;
   smartAssessmentSessions?: Record<string, StoredSmartAssessmentSession>;
   aiUsageDaily?: Record<string, number>;
+  quranChildSettings?: Record<string, QuranChildSettings>;
+  quranSurahProgress?: Record<string, QuranSurahProgress>;
+  quranStoryProgress?: Record<string, QuranStoryProgress>;
+  quranMannerProgress?: Record<string, QuranMannerProgress>;
+  quranActivityEvents?: QuranActivityEvent[];
+  quranContentVerifications?: Record<string, QuranContentVerificationRecord>;
   operationalMetrics: OperationalMetrics;
   securityLogs: SecurityEventLog[];
 }

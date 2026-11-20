@@ -526,4 +526,5 @@ export const REPORT_SUBJECT_LABELS: Record<ReportSubjectKey, LocalizedText> = {
   logic: { ar: 'المنطق والمهارات المعرفية', en: 'Logic & Cognitive Skills' },
   creative: { ar: 'الإبداع والفنون والقصص', en: 'Creative Arts & Stories' },
   general: { ar: 'المعرفة العامة والعلوم', en: 'General Knowledge & Science' },
+  'quran-values': { ar: 'القرآن والقيم الإسلامية', en: 'Quran & Islamic Values' },
 };

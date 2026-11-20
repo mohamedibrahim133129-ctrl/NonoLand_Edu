@@ -22,6 +22,7 @@ import {
 import { sanitizeShortText } from '../src/utils/validation';
 import { recordAuditEvent } from './auditLog';
 import { awardGardenMilestoneIdempotent } from './familyHelpers';
+import { buildChildQuranSummary } from './quranRoutes';
 import { appendSecurityLog, getClientIp } from './security';
 import { runWithPgDbLock } from './pgStore';
 import type { AuthenticatedRequest, ServerDb, StoredChildRecord } from './dbTypes';
@@ -759,7 +760,8 @@ export function registerWorldExperienceRoutes({
     });
     saveDb(db);
 
-    const report = buildMonthlyReport(child, monthParam, compareParam);
+    const quranSummary = buildChildQuranSummary(db, child);
+    const report = buildMonthlyReport(child, monthParam, compareParam, quranSummary.growthSummary);
     res.json({ report });
   });
 

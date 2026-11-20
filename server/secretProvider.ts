@@ -607,7 +607,7 @@ export function getNonSensitiveDbSettings(): {
   SQL_SSL: boolean;
 } {
   const dbName =
-    (process.env.SQL_DB_NAME || process.env.NONOLAND_DB_NAME || '').trim() ||
+    (process.env.NONOLAND_DB_NAME || process.env.SQL_DB_NAME || '').trim() ||
     NON_SENSITIVE_DB_DEFAULTS.SQL_DB_NAME;
   const rawPort = Number((process.env.SQL_PORT || '').trim());
   const port = Number.isFinite(rawPort) && rawPort > 0 ? rawPort : NON_SENSITIVE_DB_DEFAULTS.SQL_PORT;

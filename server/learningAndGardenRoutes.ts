@@ -500,6 +500,21 @@ export function registerLearningAndGardenRoutes({
           itemId: 'garden-cherry-tree',
           reason: { ar: 'تحقيق ٥ خطوات تعلم ممتعة', en: 'Completed 5 joyful learning moments' },
         },
+        'quran-first-listen': {
+          qualified: Object.values(db.quranSurahProgress || {}).some((p) => p.childId === child.id && p.listenCount >= 1),
+          itemId: 'garden-olive-tree',
+          reason: { ar: 'أول لحظة استماع هادئة في عالم القرآن', en: 'First peaceful moment in Quran World' },
+        },
+        'quran-repeat-explorer': {
+          qualified: Object.values(db.quranSurahProgress || {}).some((p) => p.childId === child.id && p.repeatSessionsCount >= 1),
+          itemId: 'garden-star-lantern',
+          reason: { ar: 'الترديد اللطيف لآيات القرآن الكريم', en: 'Gentle listen & repeat in Quran World' },
+        },
+        'quran-kind-manners': {
+          qualified: Object.values(db.quranMannerProgress || {}).some((p) => p.childId === child.id && p.practicedCount >= 1),
+          itemId: 'garden-family-blossom',
+          reason: { ar: 'ممارسة أدب إسلامي جميل اليوم', en: 'Practiced a kind Islamic manner today' },
+        },
       };
 
       const rule = rules[cleanKey];

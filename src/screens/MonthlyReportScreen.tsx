@@ -324,8 +324,8 @@ export const MonthlyReportScreen: React.FC = () => {
                 <BookOpen className="w-5 h-5 text-[#8054D9]" />
                 <span>
                   {language === 'ar'
-                    ? 'الأداء حسب المجالات الستة (بداية الشهر مقابل الحالي)'
-                    : '6-Domain Performance (Starting Baseline vs Current)'}
+                    ? 'الأداء حسب المجالات السبعة (بداية الشهر مقابل الحالي)'
+                    : '7-Domain Growth Breakdown (Starting Baseline vs Current)'}
                 </span>
               </h3>
               <p className="text-xs text-[#27345C]/70 mt-0.5">
@@ -351,44 +351,65 @@ export const MonthlyReportScreen: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="p-2 rounded-xl bg-white border border-[#27345C]/8">
-                    <p className="text-[10px] font-bold text-[#27345C]/60">
-                      {language === 'ar' ? 'نقطة البداية' : 'Start Baseline'}
-                    </p>
-                    <p className="text-xs sm:text-sm font-extrabold text-[#27345C] tabular-nums mt-0.5">
-                      {subj.baselineAvailable && subj.baselineAccuracyPct !== null
-                        ? `${subj.baselineAccuracyPct}%`
-                        : notEnoughText}
-                    </p>
+                {subj.subjectKey === 'quran-values' ? (
+                  <div className="grid grid-cols-2 gap-2 text-center">
+                    <div className="p-2 rounded-xl bg-white border border-[#27345C]/8">
+                      <p className="text-[10px] font-bold text-[#27345C]/60">
+                        {language === 'ar' ? 'الأنشطة والجلسات' : 'Moments Logged'}
+                      </p>
+                      <p className="text-xs sm:text-sm font-extrabold text-[#047857] tabular-nums mt-0.5">
+                        {formatNumber(subj.completedLessonsAndActivities, language)}
+                      </p>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white border border-[#27345C]/8">
+                      <p className="text-[10px] font-bold text-[#27345C]/60">
+                        {language === 'ar' ? 'نظام التقييم' : 'Assessment'}
+                      </p>
+                      <p className="text-xs sm:text-sm font-extrabold text-[#27345C] mt-0.5">
+                        {language === 'ar' ? 'مستقل عن الاختبارات' : 'Exam-Free'}
+                      </p>
+                    </div>
                   </div>
-                  <div className="p-2 rounded-xl bg-white border border-[#27345C]/8">
-                    <p className="text-[10px] font-bold text-[#27345C]/60">
-                      {language === 'ar' ? 'المستوى الحالي' : 'Current'}
-                    </p>
-                    <p className="text-xs sm:text-sm font-extrabold text-[#39BDF2] tabular-nums mt-0.5">
-                      {subj.currentAccuracyPct !== null ? `${subj.currentAccuracyPct}%` : notEnoughText}
-                    </p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="p-2 rounded-xl bg-white border border-[#27345C]/8">
+                      <p className="text-[10px] font-bold text-[#27345C]/60">
+                        {language === 'ar' ? 'نقطة البداية' : 'Start Baseline'}
+                      </p>
+                      <p className="text-xs sm:text-sm font-extrabold text-[#27345C] tabular-nums mt-0.5">
+                        {subj.baselineAvailable && subj.baselineAccuracyPct !== null
+                          ? `${subj.baselineAccuracyPct}%`
+                          : notEnoughText}
+                      </p>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white border border-[#27345C]/8">
+                      <p className="text-[10px] font-bold text-[#27345C]/60">
+                        {language === 'ar' ? 'المستوى الحالي' : 'Current'}
+                      </p>
+                      <p className="text-xs sm:text-sm font-extrabold text-[#39BDF2] tabular-nums mt-0.5">
+                        {subj.currentAccuracyPct !== null ? `${subj.currentAccuracyPct}%` : notEnoughText}
+                      </p>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white border border-[#27345C]/8">
+                      <p className="text-[10px] font-bold text-[#27345C]/60">
+                        {language === 'ar' ? 'التحسن' : 'Change'}
+                      </p>
+                      <p
+                        className={`text-xs sm:text-sm font-extrabold tabular-nums mt-0.5 ${
+                          subj.improvementDeltaPct === null
+                            ? 'text-[#64748B]'
+                            : subj.improvementDeltaPct >= 0
+                              ? 'text-[#166534]'
+                              : 'text-[#B45309]'
+                        }`}
+                      >
+                        {subj.improvementDeltaPct !== null
+                          ? `${subj.improvementDeltaPct >= 0 ? '+' : ''}${subj.improvementDeltaPct}%`
+                          : notEnoughText}
+                      </p>
+                    </div>
                   </div>
-                  <div className="p-2 rounded-xl bg-white border border-[#27345C]/8">
-                    <p className="text-[10px] font-bold text-[#27345C]/60">
-                      {language === 'ar' ? 'التحسن' : 'Change'}
-                    </p>
-                    <p
-                      className={`text-xs sm:text-sm font-extrabold tabular-nums mt-0.5 ${
-                        subj.improvementDeltaPct === null
-                          ? 'text-[#64748B]'
-                          : subj.improvementDeltaPct >= 0
-                            ? 'text-[#166534]'
-                            : 'text-[#B45309]'
-                      }`}
-                    >
-                      {subj.improvementDeltaPct !== null
-                        ? `${subj.improvementDeltaPct >= 0 ? '+' : ''}${subj.improvementDeltaPct}%`
-                        : notEnoughText}
-                    </p>
-                  </div>
-                </div>
+                )}
 
                 <p className="text-xs text-[#27345C]/80 leading-relaxed">{t(subj.note, language)}</p>
               </div>

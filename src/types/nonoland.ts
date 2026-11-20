@@ -91,7 +91,8 @@ export type AppScreen =
   | 'nono-ai'
   | 'reading-adventure'
   | 'family-activities'
-  | 'entertainment-hub';
+  | 'entertainment-hub'
+  | 'quran-world';
 
 export type ConceptDomain = 'arabic' | 'english' | 'numbers' | 'colors-shapes' | 'science';
 
@@ -1265,6 +1266,7 @@ export interface FeatureFlags {
   newSubjectsEnabled: boolean;
   newGameModulesEnabled: boolean;
   requireTeacherContentApproval: boolean;
+  quranWorldEnabled: boolean;
 }
 
 // =========================================================================
@@ -1390,7 +1392,8 @@ export type ReportSubjectKey =
   | 'math'
   | 'logic'
   | 'creative'
-  | 'general';
+  | 'general'
+  | 'quran-values';
 
 export interface MonthlySubjectSnapshot {
   subjectKey: ReportSubjectKey;
@@ -1444,7 +1447,8 @@ export interface ActivityTimelineEvent {
     | 'exam'
     | 'reading'
     | 'family'
-    | 'entertainment';
+    | 'entertainment'
+    | 'quran';
   title: LocalizedText;
   detail: LocalizedText;
   starsEarned?: number;
@@ -1934,6 +1938,179 @@ export interface LearningGardenState {
   theme: 'sunny-meadow' | 'spring-rain' | 'starlight-garden';
   milestonesUnlocked: string[];
 }
+
+// =========================================================================
+// QURAN WORLD (عالم القرآن الكريم — اسمع، ردد، واتعلم مع نونو)
+// =========================================================================
+
+export type QuranVerificationStatus = 'verified' | 'pending_verification' | 'unavailable';
+
+export type QuranMemorizationStatus =
+  | 'not_started'
+  | 'heard'
+  | 'practiced'
+  | 'familiar'
+  | 'parent_confirmed';
+
+export interface QuranAyahSpec {
+  number: number;
+  verseKey: string;
+  textUthmani: string;
+  ageMeaning: {
+    young: LocalizedText;
+    mid: LocalizedText;
+    older: LocalizedText;
+  };
+}
+
+export interface QuranSurahSpec {
+  id: string;
+  number: number;
+  nameAr: string;
+  nameEn: string;
+  englishMeaning: string;
+  revelationType: 'meccan' | 'medinan';
+  ayahCount: number;
+  recommendedMinBand: InternalAgeBand;
+  hasOpeningBasmalah: boolean;
+  textSource: string;
+  textSourceUrl: string;
+  textVerificationStatus: QuranVerificationStatus;
+  textSha256: string;
+  ayahs: QuranAyahSpec[];
+  ageSummary: {
+    young: LocalizedText;
+    mid: LocalizedText;
+    older: LocalizedText;
+  };
+  gentleValue: LocalizedText;
+}
+
+export interface QuranReciterSpec {
+  id: string;
+  name: LocalizedText;
+  reciterType: 'adult' | 'child';
+  style: LocalizedText;
+  sourceName: string;
+  licenseOrPermission: string;
+  tajweedReviewedBy?: string;
+  tajweedReviewedAt?: string;
+  verificationStatus: QuranVerificationStatus;
+  surahAudioUrls?: Record<string, string>;
+  ayahAudioUrls?: Record<string, string>;
+  unavailableReason?: LocalizedText;
+}
+
+export interface QuranStorySpec {
+  id: string;
+  title: LocalizedText;
+  recommendedMinBand: InternalAgeBand;
+  symbolicTheme: 'birds-protection' | 'olive-ark' | 'kind-brothers' | 'little-ant' | 'light-cave';
+  symbolicElements: string[];
+  prohibitsProphetDepiction: true;
+  ageSummary: {
+    young: LocalizedText;
+    mid: LocalizedText;
+    older: LocalizedText;
+  };
+  narrationNote: LocalizedText;
+  quotedVerse?: {
+    surahId: string;
+    verseKey: string;
+    textUthmani: string;
+  };
+  moralLesson: LocalizedText;
+}
+
+export interface QuranMannerSpec {
+  id: string;
+  title: LocalizedText;
+  phraseAr: string;
+  transliteration: string;
+  icon: string;
+  whenToUse: LocalizedText;
+  agePractice: {
+    young: LocalizedText;
+    mid: LocalizedText;
+    older: LocalizedText;
+  };
+  togetherPrompt: LocalizedText;
+}
+
+export interface QuranChildSettings {
+  childId: string;
+  enabled: boolean;
+  allowedSurahIds: string[];
+  surahOrder: string[];
+  preferredReciterId: string;
+  preferChildReciterFallback: boolean;
+  repeatCount: number;
+  listenOnlyMode: boolean;
+  dailyMaxMinutes: number;
+  gentleReminderEnabled: boolean;
+  updatedByUserId?: string;
+  updatedAt: string;
+}
+
+export interface QuranSurahProgress {
+  id: string;
+  childId: string;
+  surahId: string;
+  listenCount: number;
+  repeatSessionsCount: number;
+  ayahsPracticed: number[];
+  status: QuranMemorizationStatus;
+  parentConfirmedMemorization: boolean;
+  parentConfirmedAt?: string;
+  parentConfirmedByUserId?: string;
+  parentNote?: string;
+  lastListenedAt?: string;
+  updatedAt: string;
+}
+
+export interface QuranStoryProgress {
+  id: string;
+  childId: string;
+  storyId: string;
+  completedCount: number;
+  lastReadAt: string;
+}
+
+export interface QuranMannerProgress {
+  id: string;
+  childId: string;
+  mannerId: string;
+  practicedCount: number;
+  lastPracticedAt: string;
+}
+
+export interface QuranActivityEvent {
+  id: string;
+  childId: string;
+  eventType: 'listen' | 'repeat' | 'story' | 'manner' | 'parent_confirm';
+  targetId: string;
+  durationSeconds: number;
+  ayahCount: number;
+  reciterId?: string;
+  recordedByUserId?: string;
+  occurredAt: string;
+}
+
+export interface QuranContentVerificationRecord {
+  id: string;
+  contentType: 'surah_text' | 'reciter_audio';
+  contentKey: string;
+  sourceName: string;
+  licenseOrPermission: string;
+  tajweedReviewedBy?: string;
+  tajweedReviewedAt?: string;
+  verificationStatus: QuranVerificationStatus;
+  audioUrlsJson?: Record<string, string>;
+  notes?: string;
+  updatedByUserId?: string;
+  updatedAt: string;
+}
+
 
 
 

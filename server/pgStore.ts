@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
 import { eq, inArray, sql } from 'drizzle-orm';
-import { db as pgDb, getPgConnectionDiagnostics, pool } from '../src/db/index.ts';
+import { db as pgDb, getPgConnectionDiagnostics, type PgConfigSource, pool } from '../src/db/index.ts';
 import * as schema from '../src/db/schema.ts';
 import { DEFAULT_FEATURE_FLAGS } from '../src/utils/validation.ts';
 import { migrateChildProfileSafely } from '../src/utils/ageAdaptation.ts';
@@ -59,6 +59,27 @@ export interface PgRequestContext {
   configHashes: Map<string, string>;
   pendingCommit: Promise<void> | null;
   inTransaction?: boolean;
+  quranSchemaReady?: boolean;
+}
+
+export function isQuranSchemaReady(): boolean {
+  const ctx = pgRequestAls.getStore();
+  if (!ctx) return true;
+  return ctx.quranSchemaReady !== false;
+}
+
+async function checkQuranTablesReady(runner: PgRunner): Promise<boolean> {
+  const res = await runner.execute(sql`
+    SELECT
+      to_regclass('public.quran_child_settings') IS NOT NULL AS s1,
+      to_regclass('public.quran_surah_progress') IS NOT NULL AS s2,
+      to_regclass('public.quran_story_progress') IS NOT NULL AS s3,
+      to_regclass('public.quran_manners_progress') IS NOT NULL AS s4,
+      to_regclass('public.quran_activity_events') IS NOT NULL AS s5,
+      to_regclass('public.quran_content_verifications') IS NOT NULL AS s6
+  `);
+  const row = (res as unknown as { rows?: Array<Record<string, unknown>> })?.rows?.[0];
+  return Boolean(row?.s1 && row?.s2 && row?.s3 && row?.s4 && row?.s5 && row?.s6);
 }
 
 const pgRequestAls = new AsyncLocalStorage<PgRequestContext>();
@@ -121,6 +142,12 @@ export function getDefaultServerDb(): ServerDb {
     processedSyncKeys: {},
     smartAssessmentSessions: {},
     aiUsageDaily: {},
+    quranChildSettings: {},
+    quranSurahProgress: {},
+    quranStoryProgress: {},
+    quranMannerProgress: {},
+    quranActivityEvents: [],
+    quranContentVerifications: {},
     operationalMetrics: {
       totalApiRequests: 0,
       apiFailures5xx: 0,
@@ -281,6 +308,9 @@ export type PgErrorClassification =
 export interface PgHealthDetails {
   healthy: boolean;
   database: 'postgresql' | 'in-memory-dev' | 'unavailable';
+  databaseName: string | null;
+  configSource: PgConfigSource;
+  configComplete: boolean;
   reason?: 'missing_env_vars' | 'auth_failed' | 'connection_failed' | 'schema_not_initialized' | 'tls_error';
   missingEnvVars?: string[];
   sslEnabled: boolean;
@@ -323,6 +353,9 @@ export async function checkPgHealthDetailed(): Promise<PgHealthDetails> {
     return {
       healthy: true,
       database: 'in-memory-dev',
+      databaseName: null,
+      configSource: 'none',
+      configComplete: false,
       sslEnabled: false,
       isNeonHost: false,
       isPooledEndpoint: false,
@@ -331,14 +364,17 @@ export async function checkPgHealthDetailed(): Promise<PgHealthDetails> {
   }
 
   const diag = getPgConnectionDiagnostics();
-  const effectiveDbName = (process.env.SQL_DB_NAME || process.env.NONOLAND_DB_NAME || '').trim() || 'neondb';
-  const effectiveUser = (process.env.SQL_USER || process.env.NONOLAND_DB_USER || '').trim();
+  const effectiveDbName = diag.databaseName || (process.env.NONOLAND_DB_NAME || process.env.SQL_DB_NAME || '').trim() || 'neondb';
+  const effectiveUser = (process.env.NONOLAND_DB_USER || process.env.SQL_USER || '').trim();
   const sameUserAndDb = Boolean(effectiveUser) && effectiveUser === effectiveDbName;
 
   if (!diag.configured) {
     return {
       healthy: false,
       database: 'unavailable',
+      databaseName: diag.databaseName,
+      configSource: diag.configSource,
+      configComplete: diag.configComplete,
       reason: 'missing_env_vars',
       missingEnvVars: diag.missingEnvVars,
       sslEnabled: diag.sslEnabled,
@@ -364,6 +400,9 @@ export async function checkPgHealthDetailed(): Promise<PgHealthDetails> {
     return {
       healthy: false,
       database: 'unavailable',
+      databaseName: diag.databaseName,
+      configSource: diag.configSource,
+      configComplete: diag.configComplete,
       reason: classified.reason,
       sslEnabled: diag.sslEnabled,
       isNeonHost: diag.isNeonHost,
@@ -384,6 +423,9 @@ export async function checkPgHealthDetailed(): Promise<PgHealthDetails> {
       return {
         healthy: false,
         database: 'unavailable',
+        databaseName: diag.databaseName,
+        configSource: diag.configSource,
+        configComplete: diag.configComplete,
         reason: 'schema_not_initialized',
         sslEnabled: diag.sslEnabled,
         isNeonHost: diag.isNeonHost,
@@ -395,6 +437,9 @@ export async function checkPgHealthDetailed(): Promise<PgHealthDetails> {
     return {
       healthy: true,
       database: 'postgresql',
+      databaseName: diag.databaseName,
+      configSource: diag.configSource,
+      configComplete: diag.configComplete,
       sslEnabled: diag.sslEnabled,
       isNeonHost: diag.isNeonHost,
       isPooledEndpoint: diag.isPooledEndpoint,
@@ -410,6 +455,9 @@ export async function checkPgHealthDetailed(): Promise<PgHealthDetails> {
     return {
       healthy: false,
       database: 'unavailable',
+      databaseName: diag.databaseName,
+      configSource: diag.configSource,
+      configComplete: diag.configComplete,
       reason: 'connection_failed',
       sslEnabled: diag.sslEnabled,
       isNeonHost: diag.isNeonHost,
@@ -668,6 +716,12 @@ function buildContextCaches(snapshot: ServerDb): {
   recordMap('homeworkSubmissions', snapshot.homeworkSubmissions);
   recordMap('homeworkAttachments', snapshot.homeworkAttachments);
   recordMap('importBatches', snapshot.importBatches);
+  recordMap('quranChildSettings', snapshot.quranChildSettings);
+  recordMap('quranSurahProgress', snapshot.quranSurahProgress);
+  recordMap('quranStoryProgress', snapshot.quranStoryProgress);
+  recordMap('quranMannerProgress', snapshot.quranMannerProgress);
+  recordArrayById('quranActivityEvents', snapshot.quranActivityEvents);
+  recordMap('quranContentVerifications', snapshot.quranContentVerifications);
 
   const configHashes = new Map<string, string>();
   configHashes.set('examConfig', stableHashValue(snapshot.examConfig));
@@ -688,11 +742,21 @@ export async function loadServerDbSnapshotPg(runner: PgRunner = pgDb): Promise<P
       serializedCache: new Map(),
       configHashes: new Map(),
       pendingCommit: null,
+      quranSchemaReady: true,
     };
   }
   assertPgConfiguredOrThrow();
 
   let loadedRows;
+  let quranSchemaReady = false;
+  let quranLoadedRows: [
+    Array<typeof schema.quranChildSettings.$inferSelect>,
+    Array<typeof schema.quranSurahProgress.$inferSelect>,
+    Array<typeof schema.quranStoryProgress.$inferSelect>,
+    Array<typeof schema.quranMannerProgress.$inferSelect>,
+    Array<typeof schema.quranActivityEvents.$inferSelect>,
+    Array<typeof schema.quranContentVerifications.$inferSelect>,
+  ] = [[], [], [], [], [], []];
   try {
     // Preflight a single lightweight query so auth/network errors fail once instead of logging 39 Failed query traces
     await runner.execute(sql`SELECT 1`);
@@ -737,6 +801,17 @@ export async function loadServerDbSnapshotPg(runner: PgRunner = pgDb): Promise<P
       runner.select().from(schema.importBatches),
       runner.select().from(schema.appConfigs),
     ]);
+    quranSchemaReady = await checkQuranTablesReady(runner);
+    if (quranSchemaReady) {
+      quranLoadedRows = await Promise.all([
+        runner.select().from(schema.quranChildSettings),
+        runner.select().from(schema.quranSurahProgress),
+        runner.select().from(schema.quranStoryProgress),
+        runner.select().from(schema.quranMannerProgress),
+        runner.select().from(schema.quranActivityEvents),
+        runner.select().from(schema.quranContentVerifications),
+      ]);
+    }
   } catch (err) {
     const pgCode = (err as { code?: string; cause?: { code?: string } })?.code ||
       (err as { cause?: { code?: string } })?.cause?.code;
@@ -798,6 +873,14 @@ export async function loadServerDbSnapshotPg(runner: PgRunner = pgDb): Promise<P
     importBatchRows,
     appConfigRows,
   ] = loadedRows;
+  const [
+    quranSettingsRows,
+    quranSurahProgRows,
+    quranStoryProgRows,
+    quranMannerProgRows,
+    quranActivityRows,
+    quranVerificationRows,
+  ] = quranLoadedRows;
 
   const snap = getDefaultServerDb();
 
@@ -1470,6 +1553,92 @@ export async function loadServerDbSnapshotPg(runner: PgRunner = pgDb): Promise<P
     }
   }
 
+  for (const r of quranSettingsRows) {
+    snap.quranChildSettings![r.childId] = {
+      childId: r.childId,
+      enabled: Boolean(r.enabled),
+      allowedSurahIds: r.allowedSurahIds || [],
+      surahOrder: r.surahOrder || [],
+      preferredReciterId: r.preferredReciterId,
+      preferChildReciterFallback: Boolean(r.preferChildReciterFallback),
+      repeatCount: Number(r.repeatCount || 2),
+      listenOnlyMode: Boolean(r.listenOnlyMode),
+      dailyMaxMinutes: Number(r.dailyMaxMinutes || 15),
+      gentleReminderEnabled: Boolean(r.gentleReminderEnabled),
+      updatedByUserId: r.updatedByUserId ?? undefined,
+      updatedAt: r.updatedAt,
+    };
+  }
+
+  for (const r of quranSurahProgRows) {
+    snap.quranSurahProgress![r.id] = {
+      id: r.id,
+      childId: r.childId,
+      surahId: r.surahId,
+      listenCount: Number(r.listenCount || 0),
+      repeatSessionsCount: Number(r.repeatSessionsCount || 0),
+      ayahsPracticed: r.ayahsPracticed || [],
+      status: r.status,
+      parentConfirmedMemorization: Boolean(r.parentConfirmedMemorization),
+      parentConfirmedAt: r.parentConfirmedAt ?? undefined,
+      parentConfirmedByUserId: r.parentConfirmedByUserId ?? undefined,
+      parentNote: r.parentNote ?? undefined,
+      lastListenedAt: r.lastListenedAt ?? undefined,
+      updatedAt: r.updatedAt,
+    };
+  }
+
+  for (const r of quranStoryProgRows) {
+    snap.quranStoryProgress![r.id] = {
+      id: r.id,
+      childId: r.childId,
+      storyId: r.storyId,
+      completedCount: Number(r.completedCount || 0),
+      lastReadAt: r.lastReadAt,
+    };
+  }
+
+  for (const r of quranMannerProgRows) {
+    snap.quranMannerProgress![r.id] = {
+      id: r.id,
+      childId: r.childId,
+      mannerId: r.mannerId,
+      practicedCount: Number(r.practicedCount || 0),
+      lastPracticedAt: r.lastPracticedAt,
+    };
+  }
+
+  snap.quranActivityEvents = quranActivityRows
+    .map((r) => ({
+      id: r.id,
+      childId: r.childId,
+      eventType: r.eventType,
+      targetId: r.targetId,
+      durationSeconds: Number(r.durationSeconds || 0),
+      ayahCount: Number(r.ayahCount || 0),
+      reciterId: r.reciterId ?? undefined,
+      recordedByUserId: r.recordedByUserId ?? undefined,
+      occurredAt: r.occurredAt,
+    }))
+    .sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : -1));
+
+  for (const r of quranVerificationRows) {
+    snap.quranContentVerifications![r.contentKey] = {
+      id: r.id,
+      contentType: r.contentType,
+      contentKey: r.contentKey,
+      sourceName: r.sourceName,
+      licenseOrPermission: r.licenseOrPermission,
+      tajweedReviewedBy: r.tajweedReviewedBy ?? undefined,
+      tajweedReviewedAt: r.tajweedReviewedAt ?? undefined,
+      verificationStatus: r.verificationStatus,
+      audioUrlsJson: r.audioUrlsJson ?? undefined,
+      notes: r.notes ?? undefined,
+      updatedByUserId: r.updatedByUserId ?? undefined,
+      updatedAt: r.updatedAt,
+    };
+  }
+
   ensureFamilyCollections(snap);
   const { serializedCache, configHashes } = buildContextCaches(snap);
   return {
@@ -1477,6 +1646,7 @@ export async function loadServerDbSnapshotPg(runner: PgRunner = pgDb): Promise<P
     serializedCache,
     configHashes,
     pendingCommit: null,
+    quranSchemaReady,
   };
 }
 
@@ -1582,6 +1752,15 @@ export async function commitServerDbDiffPg(
   const dHomeworkSubs = diffRecordMap(ctx.serializedCache.get('homeworkSubmissions'), after.homeworkSubmissions);
   const dHomeworkAtts = diffRecordMap(ctx.serializedCache.get('homeworkAttachments'), after.homeworkAttachments);
   const dImportBatches = diffRecordMap(ctx.serializedCache.get('importBatches'), after.importBatches);
+  const dQuranSettings = diffRecordMap(ctx.serializedCache.get('quranChildSettings'), after.quranChildSettings);
+  const dQuranSurahProg = diffRecordMap(ctx.serializedCache.get('quranSurahProgress'), after.quranSurahProgress);
+  const dQuranStoryProg = diffRecordMap(ctx.serializedCache.get('quranStoryProgress'), after.quranStoryProgress);
+  const dQuranMannerProg = diffRecordMap(ctx.serializedCache.get('quranMannerProgress'), after.quranMannerProgress);
+  const dQuranEvents = diffArrayById(ctx.serializedCache.get('quranActivityEvents'), after.quranActivityEvents);
+  const dQuranVerifications = diffRecordMap(
+    ctx.serializedCache.get('quranContentVerifications'),
+    after.quranContentVerifications,
+  );
 
   const configChanges: Array<{ key: string; value: unknown; hash: string }> = [];
   for (const [k, val] of [
@@ -1638,11 +1817,37 @@ export async function commitServerDbDiffPg(
       dHomeworkSubs,
       dHomeworkAtts,
       dImportBatches,
+      dQuranSettings,
+      dQuranSurahProg,
+      dQuranStoryProg,
+      dQuranMannerProg,
+      dQuranEvents,
+      dQuranVerifications,
     ].some((d) => d.upserts.length > 0 || d.deletes.length > 0);
 
   if (!hasChanges) return;
 
+  const hasQuranChanges = [
+    dQuranSettings,
+    dQuranSurahProg,
+    dQuranStoryProg,
+    dQuranMannerProg,
+    dQuranEvents,
+    dQuranVerifications,
+  ].some((d) => d.upserts.length > 0 || d.deletes.length > 0);
+
   const execCommit = async (tx: PgRunner) => {
+    if (hasQuranChanges && ctx.quranSchemaReady === false) {
+      const readyNow = await checkQuranTablesReady(tx);
+      if (!readyNow) {
+        const err = new Error(
+          'Quran World tables are pending additive migration 0002_quran_world.sql.',
+        ) as Error & { code?: string };
+        err.code = 'QURAN_SCHEMA_PENDING';
+        throw err;
+      }
+      ctx.quranSchemaReady = true;
+    }
     // DELETES (reverse FK order)
     if (dAssignedAttempts.deletes.length) {
       await tx.delete(schema.assignedExamAttempts).where(inArray(schema.assignedExamAttempts.id, dAssignedAttempts.deletes));
@@ -1712,6 +1917,24 @@ export async function commitServerDbDiffPg(
     }
     if (dArchivedChildren.deletes.length) {
       await tx.delete(schema.archivedChildren).where(inArray(schema.archivedChildren.childId, dArchivedChildren.deletes));
+    }
+    if (dQuranEvents.deletes.length) {
+      await tx.delete(schema.quranActivityEvents).where(inArray(schema.quranActivityEvents.id, dQuranEvents.deletes));
+    }
+    if (dQuranMannerProg.deletes.length) {
+      await tx.delete(schema.quranMannerProgress).where(inArray(schema.quranMannerProgress.id, dQuranMannerProg.deletes));
+    }
+    if (dQuranStoryProg.deletes.length) {
+      await tx.delete(schema.quranStoryProgress).where(inArray(schema.quranStoryProgress.id, dQuranStoryProg.deletes));
+    }
+    if (dQuranSurahProg.deletes.length) {
+      await tx.delete(schema.quranSurahProgress).where(inArray(schema.quranSurahProgress.id, dQuranSurahProg.deletes));
+    }
+    if (dQuranSettings.deletes.length) {
+      await tx.delete(schema.quranChildSettings).where(inArray(schema.quranChildSettings.childId, dQuranSettings.deletes));
+    }
+    if (dQuranVerifications.deletes.length) {
+      await tx.delete(schema.quranContentVerifications).where(inArray(schema.quranContentVerifications.contentKey, dQuranVerifications.deletes));
     }
     if (dChildren.deletes.length) {
       await tx.delete(schema.children).where(inArray(schema.children.id, dChildren.deletes));
@@ -2830,6 +3053,128 @@ export async function commitServerDbDiffPg(
           set: { value: cfg.value as any, updatedAt: nowIso },
         });
     }
+
+    for (const { value: qs } of dQuranSettings.upserts) {
+      const payload = {
+        childId: qs.childId,
+        enabled: Boolean(qs.enabled),
+        allowedSurahIds: qs.allowedSurahIds || [],
+        surahOrder: qs.surahOrder || [],
+        preferredReciterId: qs.preferredReciterId || 'adult-husary-muallim',
+        preferChildReciterFallback: Boolean(qs.preferChildReciterFallback),
+        repeatCount: Number(qs.repeatCount || 2),
+        listenOnlyMode: Boolean(qs.listenOnlyMode),
+        dailyMaxMinutes: Number(qs.dailyMaxMinutes || 15),
+        gentleReminderEnabled: Boolean(qs.gentleReminderEnabled),
+        updatedByUserId: qs.updatedByUserId ?? null,
+        updatedAt: qs.updatedAt || nowIso,
+      };
+      const { childId: _qcid, ...updateSet } = payload;
+      await tx
+        .insert(schema.quranChildSettings)
+        .values(payload)
+        .onConflictDoUpdate({ target: schema.quranChildSettings.childId, set: updateSet });
+    }
+
+    for (const { value: qp } of dQuranSurahProg.upserts) {
+      const payload = {
+        id: qp.id,
+        childId: qp.childId,
+        surahId: qp.surahId,
+        listenCount: Number(qp.listenCount || 0),
+        repeatSessionsCount: Number(qp.repeatSessionsCount || 0),
+        ayahsPracticed: qp.ayahsPracticed || [],
+        status: qp.status || 'not_started',
+        parentConfirmedMemorization: Boolean(qp.parentConfirmedMemorization),
+        parentConfirmedAt: qp.parentConfirmedAt ?? null,
+        parentConfirmedByUserId: qp.parentConfirmedByUserId ?? null,
+        parentNote: qp.parentNote ?? null,
+        lastListenedAt: qp.lastListenedAt ?? null,
+        updatedAt: qp.updatedAt || nowIso,
+      };
+      const { id: _qid, ...updateSet } = payload;
+      await tx
+        .insert(schema.quranSurahProgress)
+        .values(payload)
+        .onConflictDoUpdate({ target: schema.quranSurahProgress.id, set: updateSet });
+    }
+
+    for (const { value: qst } of dQuranStoryProg.upserts) {
+      await tx
+        .insert(schema.quranStoryProgress)
+        .values({
+          id: qst.id,
+          childId: qst.childId,
+          storyId: qst.storyId,
+          completedCount: Number(qst.completedCount || 0),
+          lastReadAt: qst.lastReadAt || nowIso,
+        })
+        .onConflictDoUpdate({
+          target: schema.quranStoryProgress.id,
+          set: {
+            completedCount: Number(qst.completedCount || 0),
+            lastReadAt: qst.lastReadAt || nowIso,
+          },
+        });
+    }
+
+    for (const { value: qm } of dQuranMannerProg.upserts) {
+      await tx
+        .insert(schema.quranMannerProgress)
+        .values({
+          id: qm.id,
+          childId: qm.childId,
+          mannerId: qm.mannerId,
+          practicedCount: Number(qm.practicedCount || 0),
+          lastPracticedAt: qm.lastPracticedAt || nowIso,
+        })
+        .onConflictDoUpdate({
+          target: schema.quranMannerProgress.id,
+          set: {
+            practicedCount: Number(qm.practicedCount || 0),
+            lastPracticedAt: qm.lastPracticedAt || nowIso,
+          },
+        });
+    }
+
+    for (const { value: qe } of dQuranEvents.upserts) {
+      await tx
+        .insert(schema.quranActivityEvents)
+        .values({
+          id: qe.id,
+          childId: qe.childId,
+          eventType: qe.eventType,
+          targetId: qe.targetId,
+          durationSeconds: Number(qe.durationSeconds || 0),
+          ayahCount: Number(qe.ayahCount || 0),
+          reciterId: qe.reciterId ?? null,
+          recordedByUserId: qe.recordedByUserId ?? null,
+          occurredAt: qe.occurredAt || nowIso,
+        })
+        .onConflictDoNothing();
+    }
+
+    for (const { value: qv } of dQuranVerifications.upserts) {
+      const payload = {
+        id: qv.id,
+        contentType: qv.contentType,
+        contentKey: qv.contentKey,
+        sourceName: qv.sourceName,
+        licenseOrPermission: qv.licenseOrPermission,
+        tajweedReviewedBy: qv.tajweedReviewedBy ?? null,
+        tajweedReviewedAt: qv.tajweedReviewedAt ?? null,
+        verificationStatus: qv.verificationStatus,
+        audioUrlsJson: qv.audioUrlsJson ?? null,
+        notes: qv.notes ?? null,
+        updatedByUserId: qv.updatedByUserId ?? null,
+        updatedAt: qv.updatedAt || nowIso,
+      };
+      const { id: _qvid, contentKey: _qvck, ...updateSet } = payload;
+      await tx
+        .insert(schema.quranContentVerifications)
+        .values(payload)
+        .onConflictDoUpdate({ target: schema.quranContentVerifications.contentKey, set: updateSet });
+    }
   };
 
   if (txRunner) {
@@ -2922,6 +3267,7 @@ export async function runWithPgDbLock<T>(
       outerCtx.db = freshCtx.db;
       outerCtx.serializedCache = freshCtx.serializedCache;
       outerCtx.configHashes = freshCtx.configHashes;
+      outerCtx.quranSchemaReady = freshCtx.quranSchemaReady;
       outerCtx.pendingCommit = null;
     }
     return result;

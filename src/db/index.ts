@@ -7,9 +7,14 @@ declare global {
   var _postgresPool: Pool | undefined;
 }
 
+export type PgConfigSource = 'NONOLAND_DB_*' | 'SQL_*' | 'DATABASE_URL' | 'none';
+
 export interface PgConnectionDiagnostics {
   configured: boolean;
+  configComplete: boolean;
   source: 'sql_vars' | 'database_url' | 'none';
+  configSource: PgConfigSource;
+  databaseName: string | null;
   missingEnvVars: string[];
   sslEnabled: boolean;
   isNeonHost: boolean;
@@ -60,115 +65,98 @@ function sanitizePgErrorMessage(msg: string): string {
 }
 
 function getResolvedSqlHost(): string {
-  return (process.env.SQL_HOST || '').trim() || (process.env.NONOLAND_DB_HOST || '').trim();
+  return (process.env.NONOLAND_DB_HOST || '').trim() || (process.env.SQL_HOST || '').trim();
 }
 
 function getResolvedSqlDirectHost(): string {
-  return (process.env.SQL_DIRECT_HOST || '').trim() || (process.env.NONOLAND_DB_DIRECT_HOST || '').trim();
+  return (process.env.NONOLAND_DB_DIRECT_HOST || '').trim() || (process.env.SQL_DIRECT_HOST || '').trim();
 }
 
 function getResolvedSqlDbName(): string {
-  return (process.env.SQL_DB_NAME || '').trim() || (process.env.NONOLAND_DB_NAME || '').trim();
+  return (process.env.NONOLAND_DB_NAME || '').trim() || (process.env.SQL_DB_NAME || '').trim();
 }
 
 function getResolvedSqlUser(): string {
-  return (process.env.SQL_USER || '').trim() || (process.env.NONOLAND_DB_USER || '').trim();
+  return (process.env.NONOLAND_DB_USER || '').trim() || (process.env.SQL_USER || '').trim();
 }
 
 function getResolvedSqlPassword(): string {
-  if ((process.env.SQL_PASSWORD || '').trim()) {
-    return process.env.SQL_PASSWORD as string;
+  if ((process.env.NONOLAND_DB_PASSWORD || '').trim()) {
+    return process.env.NONOLAND_DB_PASSWORD as string;
   }
-  return process.env.NONOLAND_DB_PASSWORD ?? '';
+  return process.env.SQL_PASSWORD ?? '';
 }
 
-export function getPgConnectionDiagnostics(): PgConnectionDiagnostics {
-  const sqlHost = getResolvedSqlHost();
-  const explicitSqlDb = getResolvedSqlDbName();
-  const sqlUser = getResolvedSqlUser();
-  const sqlPassword = getResolvedSqlPassword().trim();
-  const dbUrl = (process.env.DATABASE_URL || '').trim();
-
-  if (sqlHost || explicitSqlDb || sqlUser || sqlPassword) {
-    const sqlDb = explicitSqlDb || 'neondb';
-    const missing: string[] = [];
-    if (!sqlHost) missing.push('SQL_HOST');
-    if (!sqlUser) missing.push('SQL_USER');
-    if (!sqlPassword && !isLocalOrSocketHost(sqlHost)) missing.push('SQL_PASSWORD');
-    const sslOpt = resolveSslOption(sqlHost);
-    return {
-      configured: Boolean(sqlHost && sqlDb && sqlUser && (sqlPassword || isLocalOrSocketHost(sqlHost))),
-      source: 'sql_vars',
-      missingEnvVars: missing,
-      sslEnabled: Boolean(sslOpt),
-      isNeonHost: sqlHost.toLowerCase().includes('.neon.tech'),
-      isPooledEndpoint: sqlHost.toLowerCase().includes('-pooler.'),
-      hasDirectMigrationHost: Boolean(getResolvedSqlDirectHost() || (process.env.DIRECT_DATABASE_URL || '').trim()),
-    };
-  }
-
-  if (dbUrl) {
-    try {
-      const parsed = new URL(dbUrl);
-      const host = parsed.hostname || '';
-      const sslMode = parsed.searchParams.get('sslmode');
-      const sslOpt = resolveSslOption(host, sslMode);
-      return {
-        configured: Boolean(host && parsed.pathname.replace(/^\//, '') && parsed.username),
-        source: 'database_url',
-        missingEnvVars: [],
-        sslEnabled: Boolean(sslOpt),
-        isNeonHost: host.toLowerCase().includes('.neon.tech'),
-        isPooledEndpoint: host.toLowerCase().includes('-pooler.'),
-        hasDirectMigrationHost: Boolean(getResolvedSqlDirectHost() || (process.env.DIRECT_DATABASE_URL || '').trim()),
-      };
-    } catch {
-      return {
-        configured: false,
-        source: 'database_url',
-        missingEnvVars: ['DATABASE_URL (invalid connection URI format)'],
-        sslEnabled: false,
-        isNeonHost: false,
-        isPooledEndpoint: false,
-        hasDirectMigrationHost: false,
-      };
-    }
-  }
-
-  return {
-    configured: false,
-    source: 'none',
-    missingEnvVars: ['SQL_HOST', 'SQL_DB_NAME', 'SQL_USER', 'SQL_PASSWORD'],
-    sslEnabled: false,
-    isNeonHost: false,
-    isPooledEndpoint: false,
-    hasDirectMigrationHost: false,
-  };
+interface ResolvedPgConfig {
+  diagnostics: PgConnectionDiagnostics;
+  poolConfig: PoolConfig;
 }
 
-function buildPoolConfig(): PoolConfig {
+function resolvePgConfig(): ResolvedPgConfig {
   const max = Number(process.env.SQL_POOL_MAX) || 10;
   const connectionTimeoutMillis = Number(process.env.SQL_CONNECTION_TIMEOUT_MS) || 15000;
   const idleTimeoutMillis = Number(process.env.SQL_IDLE_TIMEOUT_MS) || 30000;
+  const sqlPort = Number(process.env.SQL_PORT) || 5432;
+
+  const nonolandHost = (process.env.NONOLAND_DB_HOST || '').trim();
+  const nonolandDb = (process.env.NONOLAND_DB_NAME || '').trim();
+  const nonolandUser = (process.env.NONOLAND_DB_USER || '').trim();
+  const nonolandPassword = process.env.NONOLAND_DB_PASSWORD ?? '';
+  const hasAnyNonoland = Boolean(nonolandHost || nonolandDb || nonolandUser || nonolandPassword.trim());
+
+  const rawSqlHost = (process.env.SQL_HOST || '').trim();
+  const rawSqlDb = (process.env.SQL_DB_NAME || '').trim();
+  const rawSqlUser = (process.env.SQL_USER || '').trim();
+  const rawSqlPassword = process.env.SQL_PASSWORD ?? '';
+  const hasAnySql = Boolean(rawSqlHost || rawSqlDb || rawSqlUser || rawSqlPassword.trim());
 
   const sqlHost = getResolvedSqlHost();
   const explicitSqlDb = getResolvedSqlDbName();
   const sqlDb = explicitSqlDb || 'neondb';
   const sqlUser = getResolvedSqlUser();
   const sqlPassword = getResolvedSqlPassword();
-  const sqlPort = Number(process.env.SQL_PORT) || 5432;
+  const trimmedPassword = sqlPassword.trim();
+  const hasDirectMigrationHost = Boolean(
+    getResolvedSqlDirectHost() || (process.env.DIRECT_DATABASE_URL || '').trim(),
+  );
 
-  if (sqlHost || sqlUser || explicitSqlDb) {
+  const individualComplete = Boolean(
+    sqlHost && sqlDb && sqlUser && (trimmedPassword || isLocalOrSocketHost(sqlHost)),
+  );
+  const individualConfigSource: PgConfigSource = nonolandHost
+    ? 'NONOLAND_DB_*'
+    : hasAnySql && !nonolandUser && !nonolandPassword.trim()
+      ? 'SQL_*'
+      : hasAnyNonoland
+        ? 'NONOLAND_DB_*'
+        : 'SQL_*';
+
+  if (individualComplete) {
+    const sslOpt = resolveSslOption(sqlHost);
     return {
-      host: sqlHost,
-      port: sqlPort,
-      user: sqlUser,
-      password: sqlPassword,
-      database: sqlDb,
-      ssl: resolveSslOption(sqlHost),
-      max,
-      connectionTimeoutMillis,
-      idleTimeoutMillis,
+      diagnostics: {
+        configured: true,
+        configComplete: true,
+        source: 'sql_vars',
+        configSource: individualConfigSource,
+        databaseName: sqlDb,
+        missingEnvVars: [],
+        sslEnabled: Boolean(sslOpt),
+        isNeonHost: sqlHost.toLowerCase().includes('.neon.tech'),
+        isPooledEndpoint: sqlHost.toLowerCase().includes('-pooler.'),
+        hasDirectMigrationHost,
+      },
+      poolConfig: {
+        host: sqlHost,
+        port: sqlPort,
+        user: sqlUser,
+        password: sqlPassword,
+        database: sqlDb,
+        ssl: sslOpt,
+        max,
+        connectionTimeoutMillis,
+        idleTimeoutMillis,
+      },
     };
   }
 
@@ -176,33 +164,137 @@ function buildPoolConfig(): PoolConfig {
   if (dbUrl) {
     try {
       const parsed = new URL(dbUrl);
-      const host = parsed.hostname;
+      const host = parsed.hostname || '';
+      const dbName = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+      const user = decodeURIComponent(parsed.username || '');
+      const password = decodeURIComponent(parsed.password || '');
       const sslMode = parsed.searchParams.get('sslmode');
+      const sslOpt = resolveSslOption(host, sslMode);
+      const complete = Boolean(host && dbName && user);
       return {
-        host,
-        port: Number(parsed.port) || sqlPort,
-        user: decodeURIComponent(parsed.username || ''),
-        password: decodeURIComponent(parsed.password || ''),
-        database: decodeURIComponent(parsed.pathname.replace(/^\//, '')),
-        ssl: resolveSslOption(host, sslMode),
-        max,
-        connectionTimeoutMillis,
-        idleTimeoutMillis,
+        diagnostics: {
+          configured: complete,
+          configComplete: complete,
+          source: 'database_url',
+          configSource: 'DATABASE_URL',
+          databaseName: dbName || null,
+          missingEnvVars: complete ? [] : ['DATABASE_URL (missing host, user, or database name)'],
+          sslEnabled: Boolean(sslOpt),
+          isNeonHost: host.toLowerCase().includes('.neon.tech'),
+          isPooledEndpoint: host.toLowerCase().includes('-pooler.'),
+          hasDirectMigrationHost,
+        },
+        poolConfig: complete
+          ? {
+              host,
+              port: Number(parsed.port) || sqlPort,
+              user,
+              password,
+              database: dbName,
+              ssl: sslOpt,
+              max,
+              connectionTimeoutMillis,
+              idleTimeoutMillis,
+            }
+          : {
+              host: undefined,
+              user: undefined,
+              password: undefined,
+              database: undefined,
+              max,
+              connectionTimeoutMillis,
+              idleTimeoutMillis,
+            },
       };
     } catch {
-      // Fall through to empty config; pgStore will reject safely with DB_UNAVAILABLE
+      return {
+        diagnostics: {
+          configured: false,
+          configComplete: false,
+          source: 'database_url',
+          configSource: 'DATABASE_URL',
+          databaseName: null,
+          missingEnvVars: ['DATABASE_URL (invalid connection URI format)'],
+          sslEnabled: false,
+          isNeonHost: false,
+          isPooledEndpoint: false,
+          hasDirectMigrationHost: false,
+        },
+        poolConfig: {
+          host: undefined,
+          user: undefined,
+          password: undefined,
+          database: undefined,
+          max,
+          connectionTimeoutMillis,
+          idleTimeoutMillis,
+        },
+      };
     }
   }
 
+  if (hasAnyNonoland || hasAnySql) {
+    const missing: string[] = [];
+    if (!sqlHost) missing.push('SQL_HOST');
+    if (!sqlUser) missing.push('SQL_USER');
+    if (!trimmedPassword && !isLocalOrSocketHost(sqlHost)) missing.push('SQL_PASSWORD');
+    const sslOpt = resolveSslOption(sqlHost);
+    return {
+      diagnostics: {
+        configured: false,
+        configComplete: false,
+        source: 'sql_vars',
+        configSource: individualConfigSource,
+        databaseName: sqlDb,
+        missingEnvVars: missing,
+        sslEnabled: Boolean(sslOpt),
+        isNeonHost: sqlHost.toLowerCase().includes('.neon.tech'),
+        isPooledEndpoint: sqlHost.toLowerCase().includes('-pooler.'),
+        hasDirectMigrationHost,
+      },
+      poolConfig: {
+        host: undefined,
+        user: undefined,
+        password: undefined,
+        database: undefined,
+        max,
+        connectionTimeoutMillis,
+        idleTimeoutMillis,
+      },
+    };
+  }
+
   return {
-    host: undefined,
-    user: undefined,
-    password: undefined,
-    database: undefined,
-    max,
-    connectionTimeoutMillis,
-    idleTimeoutMillis,
+    diagnostics: {
+      configured: false,
+      configComplete: false,
+      source: 'none',
+      configSource: 'none',
+      databaseName: null,
+      missingEnvVars: ['SQL_HOST', 'SQL_DB_NAME', 'SQL_USER', 'SQL_PASSWORD'],
+      sslEnabled: false,
+      isNeonHost: false,
+      isPooledEndpoint: false,
+      hasDirectMigrationHost: false,
+    },
+    poolConfig: {
+      host: undefined,
+      user: undefined,
+      password: undefined,
+      database: undefined,
+      max,
+      connectionTimeoutMillis,
+      idleTimeoutMillis,
+    },
   };
+}
+
+export function getPgConnectionDiagnostics(): PgConnectionDiagnostics {
+  return resolvePgConfig().diagnostics;
+}
+
+function buildPoolConfig(): PoolConfig {
+  return resolvePgConfig().poolConfig;
 }
 
 export const createPool = () => {

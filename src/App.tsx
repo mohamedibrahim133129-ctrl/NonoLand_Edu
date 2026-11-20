@@ -26,6 +26,7 @@ import { CreativeStudioScreen } from './screens/CreativeStudioScreen';
 import { ReadingAdventureScreen } from './screens/ReadingAdventureScreen';
 import { RewardShopScreen } from './screens/RewardShopScreen';
 import { ParentDashboardScreen } from './screens/ParentDashboardScreen';
+import { QuranWorldScreen } from './screens/QuranWorldScreen';
 import { TeacherDashboardScreen } from './screens/TeacherDashboardScreen';
 import {
   ChildWelcomeScreen,
@@ -215,6 +216,8 @@ const ScreenRouter: React.FC = () => {
         return <FamilyActivitiesScreen />;
       case 'entertainment-hub':
         return <EntertainmentHubScreen />;
+      case 'quran-world':
+        return <QuranWorldScreen />;
       default:
         return <ParentAuthScreen />;
     }

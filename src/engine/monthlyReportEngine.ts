@@ -38,7 +38,19 @@ export function calculateStreakDays(activeDays: string[] = []): number {
   return streak;
 }
 
-export function computeChildSubjectMetrics(child: ChildProfile): Record<
+export interface QuranGrowthMetricsInput {
+  listenedSurahsCount: number;
+  practicedSurahsCount: number;
+  familiarSurahsCount: number;
+  parentConfirmedCount: number;
+  storiesReadCount: number;
+  mannersPracticedCount: number;
+}
+
+export function computeChildSubjectMetrics(
+  child: ChildProfile,
+  quranGrowth?: QuranGrowthMetricsInput | null,
+): Record<
   ReportSubjectKey,
   {
     completedCount: number;
@@ -139,6 +151,28 @@ export function computeChildSubjectMetrics(child: ChildProfile): Record<
     };
   };
 
+  const timelineQuranCount = (child.activityTimeline || []).filter((e) => e.category === 'quran').length;
+  const quranCompletedCount = quranGrowth
+    ? quranGrowth.listenedSurahsCount +
+      quranGrowth.practicedSurahsCount +
+      quranGrowth.storiesReadCount +
+      quranGrowth.mannersPracticedCount
+    : timelineQuranCount;
+  const quranDemonstratedCount = quranGrowth
+    ? quranGrowth.parentConfirmedCount + quranGrowth.familiarSurahsCount
+    : 0;
+  const quranPracticingCount = Math.max(0, quranCompletedCount - quranDemonstratedCount);
+  let quranLevelLabel: LocalizedText = { ar: 'رحلة هادئة بانتظارك', en: 'Waiting Gently to Begin' };
+  if (quranCompletedCount > 0 || quranDemonstratedCount > 0) {
+    if (quranGrowth && quranGrowth.parentConfirmedCount > 0) {
+      quranLevelLabel = { ar: 'حفظ مؤكد من ولي الأمر', en: 'Parent-Confirmed Memorization' };
+    } else if (quranGrowth && quranGrowth.familiarSurahsCount > 0) {
+      quranLevelLabel = { ar: 'ألفة قرآنية متنامية', en: 'Growing Quran Familiarity' };
+    } else {
+      quranLevelLabel = { ar: 'استماع وقيم إسلامية', en: 'Gentle Listening & Values' };
+    }
+  }
+
   return {
     arabic: evalBucket('arabic', ['arabic'], ['arabic'], ['arabic-letters'], ['arabic-literacy']),
     english: evalBucket('english', ['english'], ['english'], ['english-letters'], ['english-literacy']),
@@ -166,6 +200,14 @@ export function computeChildSubjectMetrics(child: ChildProfile): Record<
       ['science-discovery', 'life-health'],
       labCount,
     ),
+    'quran-values': {
+      completedCount: quranCompletedCount,
+      demonstratedCount: quranDemonstratedCount,
+      practicingCount: quranPracticingCount,
+      needsRevisionCount: 0,
+      accuracyPct: null,
+      levelLabel: quranLevelLabel,
+    },
   };
 }
 
@@ -203,8 +245,9 @@ export function buildMonthlyReport(
   child: ChildProfile,
   monthKey = getCurrentMonthKey(),
   compareWithMonthKey?: string,
+  quranGrowth?: QuranGrowthMetricsInput | null,
 ): MonthlyReportData {
-  const metrics = computeChildSubjectMetrics(child);
+  const metrics = computeChildSubjectMetrics(child, quranGrowth);
   const snapshots = child.monthlySnapshots || {};
   const monthSnapshot = snapshots[monthKey];
   const baselineAvailable = Boolean(monthSnapshot);
@@ -232,7 +275,24 @@ export function buildMonthlyReport(
     const delta = hasSubjectBaseline ? curr.accuracyPct! - base!.accuracyPct! : null;
 
     let note: LocalizedText;
-    if (curr.completedCount === 0) {
+    if (subjectKey === 'quran-values') {
+      if (curr.completedCount === 0 && curr.demonstratedCount === 0) {
+        note = {
+          ar: 'مسار مستقل عن درجات الاختبارات — لم تُسجل جلسات استماع أو قصص قرآنية بعد في هذه الفترة.',
+          en: 'Tracked independently from exam scores — no Quran listening or values sessions logged yet in this period.',
+        };
+      } else if (quranGrowth) {
+        note = {
+          ar: `مسار مستقل عن الاختبارات: ${quranGrowth.listenedSurahsCount} سور مسموعة · ${quranGrowth.parentConfirmedCount} محفوظة بتأكيد الأهل · ${quranGrowth.storiesReadCount} قصص · ${quranGrowth.mannersPracticedCount} آداب.`,
+          en: `Independent from exam scores: ${quranGrowth.listenedSurahsCount} Surahs heard · ${quranGrowth.parentConfirmedCount} parent-confirmed · ${quranGrowth.storiesReadCount} stories · ${quranGrowth.mannersPracticedCount} manners.`,
+        };
+      } else {
+        note = {
+          ar: `مسار مستقل عن درجات الاختبارات: ${curr.completedCount} تفاعل هادئ في عالم القرآن والآداب.`,
+          en: `Tracked independently from exam scores: ${curr.completedCount} peaceful Quran & values moments.`,
+        };
+      }
+    } else if (curr.completedCount === 0) {
       note = {
         ar: 'لا توجد أنشطة مسجلة في هذا المجال بعد خلال هذه الفترة.',
         en: 'Not enough activity recorded in this domain yet for this period.',
@@ -274,6 +334,15 @@ export function buildMonthlyReport(
   const areasNeedingAttention: LocalizedText[] = [];
 
   subjectBreakdown.forEach((s) => {
+    if (s.subjectKey === 'quran-values') {
+      if (s.demonstratedCount >= 1 || s.completedLessonsAndActivities >= 2) {
+        strengths.push({
+          ar: `${s.title.ar}: تفاعل هادئ وإيجابي (${s.completedLessonsAndActivities} نشاطاً، مستقل عن درجات الاختبارات).`,
+          en: `${s.title.en}: Calm, steady engagement (${s.completedLessonsAndActivities} moments, independent of exam scores).`,
+        });
+      }
+      return;
+    }
     if (s.demonstratedCount >= 2 || (s.currentAccuracyPct !== null && s.currentAccuracyPct >= 80)) {
       strengths.push({
         ar: `${s.title.ar}: أظهر فهماً جيداً (${s.currentAccuracyPct ?? 100}% دقة عبر ${s.completedLessonsAndActivities} أنشطة).`,

@@ -609,6 +609,37 @@ export const HomeScreen: React.FC = () => {
         </div>
       </section>
 
+      {/* FEATURED QURAN WORLD BANNER */}
+      <section>
+        <button
+          type="button"
+          onClick={() => {
+            soundEngine.playPop();
+            navigate('quran-world');
+          }}
+          className="w-full nono-card rounded-3xl p-5 sm:p-6 text-start bg-gradient-to-br from-[#ECFDF5] via-[#FFFDF7] to-[#FEF3C7] border-2 border-[#047857]/25 hover:border-[#047857] transition-all cursor-pointer flex flex-wrap items-center justify-between gap-4"
+        >
+          <div className="space-y-1.5 max-w-2xl">
+            <div className="flex items-center gap-2 text-xs font-extrabold text-[#047857]">
+              <span>🌙</span>
+              <span>{language === 'ar' ? 'اسمع، ردد، واتعلم مع نونو' : 'Listen, Repeat & Learn with Nono'}</span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-extrabold text-[#27345C]">
+              {language === 'ar' ? 'عالم القرآن الكريم — Quran World' : 'Quran World — عالم القرآن الكريم'}
+            </h2>
+            <p className="text-xs sm:text-sm text-[#27345C]/80">
+              {language === 'ar'
+                ? 'سور قصيرة موثّقة بالرسم العثماني، استمع وردد مع نونو، قصص القرآن الهادفة، الآداب الإسلامية، ورحلة الحفظ مع الأهل.'
+                : 'Verified Uthmani short Surahs, calm Listen & Repeat, symbolic Quran stories, Islamic manners, and parent-confirmed memorization.'}
+            </p>
+          </div>
+          <div className="min-h-[48px] px-5 py-2.5 rounded-2xl bg-[#047857] text-white font-extrabold text-sm flex items-center gap-2 shrink-0 shadow-md">
+            <span>📖</span>
+            <span>{language === 'ar' ? 'افتح عالم القرآن' : 'Open Quran World'}</span>
+          </div>
+        </button>
+      </section>
+
       {/* FEATURED HUBS: LEARNING ACADEMY, OFFICIAL EXAMS & FUN ZONE */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <button

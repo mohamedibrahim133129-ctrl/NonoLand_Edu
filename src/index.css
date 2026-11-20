@@ -34,6 +34,19 @@
   font-variant-numeric: tabular-nums;
 }
 
+.font-quran-uthmani {
+  font-family: 'Amiri Quran', 'Scheherazade New', 'Amiri', 'Traditional Arabic', serif;
+  line-height: 2.35;
+  letter-spacing: 0;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+}
+
+.quran-mushaf-surface {
+  background: linear-gradient(180deg, #FFFCF3 0%, #FFF7E2 100%);
+  border: 2px solid rgba(180, 134, 44, 0.24);
+  box-shadow: 0 10px 26px -10px rgba(39, 52, 92, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+}
+
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }

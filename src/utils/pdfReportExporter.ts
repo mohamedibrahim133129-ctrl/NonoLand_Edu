@@ -297,41 +297,49 @@ export async function exportMonthlyReportPdf(
     ctx.fillStyle = '#27345C';
     ctx.font = `800 30px ${fontFamily}`;
     ctx.fillText(
-      isAr ? 'تحليل التطور حسب المجالات التعليمية الستة' : '6-Domain Subject Growth Breakdown',
+      isAr ? 'تحليل التطور حسب المجالات السبعة' : '7-Domain Growth Breakdown',
       isAr ? W - 48 : 48,
-      560,
+      556,
     );
 
     const notEnoughLabel = isAr ? 'لا توجد بيانات كافية' : 'Not enough data';
     report.subjectBreakdown.forEach((s, idx) => {
-      const ry = 592 + idx * 172;
-      drawRoundedBox(ctx, 48, ry, W - 96, 152, 22, '#FFF8E9', 'rgba(39,52,92,0.12)');
+      const ry = 584 + idx * 148;
+      drawRoundedBox(ctx, 48, ry, W - 96, 134, 20, '#FFF8E9', 'rgba(39,52,92,0.12)');
 
       const titleX = isAr ? W - 78 : 78;
       ctx.textAlign = isAr ? 'right' : 'left';
       ctx.fillStyle = '#27345C';
-      ctx.font = `800 25px ${fontFamily}`;
-      ctx.fillText(isAr ? s.title.ar : s.title.en, titleX, ry + 42);
+      ctx.font = `800 24px ${fontFamily}`;
+      ctx.fillText(isAr ? s.title.ar : s.title.en, titleX, ry + 38);
 
-      ctx.fillStyle = '#8054D9';
-      ctx.font = `700 19px ${fontFamily}`;
-      const baseText = s.baselineAvailable && s.baselineAccuracyPct !== null ? `${s.baselineAccuracyPct}%` : notEnoughLabel;
-      const currText = s.currentAccuracyPct !== null ? `${s.currentAccuracyPct}%` : notEnoughLabel;
-      const deltaText =
-        s.improvementDeltaPct !== null
-          ? `${s.improvementDeltaPct >= 0 ? '+' : ''}${s.improvementDeltaPct}%`
-          : notEnoughLabel;
+      ctx.fillStyle = s.subjectKey === 'quran-values' ? '#047857' : '#8054D9';
+      ctx.font = `700 18px ${fontFamily}`;
 
-      const summaryLine = isAr
-        ? `نقطة البداية: ${baseText}  |  المستوى الحالي: ${currText}  |  التغير: ${deltaText}  |  الأنشطة: ${s.completedLessonsAndActivities}`
-        : `Start Baseline: ${baseText}  |  Current: ${currText}  |  Delta: ${deltaText}  |  Completed: ${s.completedLessonsAndActivities}`;
-      ctx.fillText(summaryLine, titleX, ry + 82);
+      const summaryLine =
+        s.subjectKey === 'quran-values'
+          ? isAr
+            ? `مستقل عن درجات الاختبارات  |  الأنشطة المسجلة: ${s.completedLessonsAndActivities}  |  المؤكد من الأهل / المألوف: ${s.demonstratedCount}`
+            : `Independent of Exam Scores  |  Logged Moments: ${s.completedLessonsAndActivities}  |  Familiar / Parent-Confirmed: ${s.demonstratedCount}`
+          : (() => {
+              const baseText =
+                s.baselineAvailable && s.baselineAccuracyPct !== null ? `${s.baselineAccuracyPct}%` : notEnoughLabel;
+              const currText = s.currentAccuracyPct !== null ? `${s.currentAccuracyPct}%` : notEnoughLabel;
+              const deltaText =
+                s.improvementDeltaPct !== null
+                  ? `${s.improvementDeltaPct >= 0 ? '+' : ''}${s.improvementDeltaPct}%`
+                  : notEnoughLabel;
+              return isAr
+                ? `نقطة البداية: ${baseText}  |  المستوى الحالي: ${currText}  |  التغير: ${deltaText}  |  الأنشطة: ${s.completedLessonsAndActivities}`
+                : `Start Baseline: ${baseText}  |  Current: ${currText}  |  Delta: ${deltaText}  |  Completed: ${s.completedLessonsAndActivities}`;
+            })();
+      ctx.fillText(summaryLine, titleX, ry + 74);
 
       ctx.fillStyle = '#475569';
-      ctx.font = `600 18px ${fontFamily}`;
+      ctx.font = `600 17px ${fontFamily}`;
       const noteText = isAr ? s.note.ar : s.note.en;
       const lines = wrapTextLines(ctx, noteText, W - 180);
-      ctx.fillText(lines[0] || '', titleX, ry + 120);
+      ctx.fillText(lines[0] || '', titleX, ry + 110);
     });
 
     // Footer P1

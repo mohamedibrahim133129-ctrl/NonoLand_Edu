@@ -39,6 +39,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   newSubjectsEnabled: true,
   newGameModulesEnabled: true,
   requireTeacherContentApproval: false,
+  quranWorldEnabled: true,
 };
 
 export const ALLOWED_HOMEWORK_TYPES: HomeworkType[] = [
@@ -750,3 +751,41 @@ export function formatApiErrorMessage(
   }
   return rawErr || (language === 'ar' ? fallbackAr : fallbackEn);
 }
+
+export function sanitizeQuranNote(raw: unknown, maxLength = 280): string {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .replace(CONTROL_CHAR_REGEX, ' ')
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+export function clampQuranRepeatCount(raw: unknown, fallback = 2): number {
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(1, Math.min(5, Math.round(num)));
+}
+
+export function clampQuranDailyMinutes(raw: unknown, fallback = 15): number {
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(5, Math.min(60, Math.round(num)));
+}
+
+export function isSafeQuranAudioUrl(raw: unknown): boolean {
+  if (typeof raw !== 'string') return false;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 500) return false;
+  if (trimmed.startsWith('/assets/quran/') && /\.(mp3|m4a|ogg|wav)$/i.test(trimmed) && !trimmed.includes('..')) {
+    return true;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
